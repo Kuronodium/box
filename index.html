@@ -143,7 +143,7 @@
     [1,0,0,0,1],
     [0,1,1,1,0],
   ];
-  const CELL = 26;
+  const CELL = 19; // tighter cell pitch than the glyph size, so cells overlap into one solid mass
 
   // ---- Life icon: a heart drawn from '0' glyph cells ----
   const HEART_PATTERN = [
@@ -472,19 +472,35 @@
     ctx.fillText(ch, x, y);
   }
 
+  // Draws a glyph rotated in place; mirror flips it horizontally first (for
+  // symmetric left/right wings built from the same asymmetric "3" shape).
+  function drawGlyphRotated(ch, x, y, size, color, angle, mirror) {
+    ctx.save();
+    ctx.translate(x, y);
+    if (mirror) ctx.scale(-1, 1);
+    ctx.rotate(angle);
+    ctx.font = `bold ${size}px ${GLYPH_FONT}`;
+    ctx.fillStyle = color;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(ch, 0, 0);
+    ctx.restore();
+  }
+
+  // Player ship: a "0" fuselage with "3" wings laid on their side, swept back.
+  function drawPlayerShip(x, y) {
+    drawGlyphRotated('3', x - 13, y + 2, 16, '#ffd166', Math.PI / 2, false);
+    drawGlyphRotated('3', x + 13, y + 2, 16, '#ffd166', Math.PI / 2, true);
+    drawGlyph('0', x, y, 18, '#ffd166');
+  }
+
   function draw() {
     ctx.clearRect(0, 0, LOGICAL_W, LOGICAL_H);
 
     // player
     const flashing = invincibleT > 0 && Math.floor(invincibleT * 12) % 2 === 0;
     if (!flashing) {
-      ctx.beginPath();
-      ctx.moveTo(player.x, player.y - player.r);
-      ctx.lineTo(player.x - player.r, player.y + player.r);
-      ctx.lineTo(player.x + player.r, player.y + player.r);
-      ctx.closePath();
-      ctx.fillStyle = '#ffd166';
-      ctx.fill();
+      drawPlayerShip(player.x, player.y);
     }
 
     // player bullets
