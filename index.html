@@ -304,7 +304,7 @@
   let bossDeathT = 0;
   let clearDelayT = 0;
   let bossDeathBurstIdx = 0;
-  let pickups = [];       // healing pickups: green "03" falling from the top
+  let pickups = [];       // healing pickups: green "30" falling from the top
   let pickupTimer = 10;
   const PICKUP_INTERVAL = 10;
   const BOSS_FLASH_DURATION = 0.3;
@@ -453,7 +453,7 @@
     if (state !== 'playing') return;
     if (invincibleT > 0) invincibleT -= dt;
 
-    // healing pickup: a green "03" falls every 10s; touching it restores 1 life
+    // healing pickup: a green "30" falls every 10s; touching it restores 1 life
     pickupTimer -= dt;
     if (pickupTimer <= 0) {
       pickupTimer = PICKUP_INTERVAL;
@@ -804,7 +804,7 @@
     // regular enemy bullets
     enemyBullets.forEach(b => drawGlyph(b.ch, b.x, b.y, 12, '#ff5a5a'));
     // healing pickups
-    pickups.forEach(p => drawGlyph('03', p.x, p.y, 18, '#5cff8f'));
+    pickups.forEach(p => drawGlyph('30', p.x, p.y, 18, '#5cff8f'));
 
     if (!boss) {
       enemies.forEach(e => drawRainbowGlyph('30', e.x, e.y, 18));
