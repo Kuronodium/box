@@ -245,7 +245,8 @@
 
   function buildBossCells() {
     const cells = [];
-    const totalW = (5 + 1 + 5) * CELL_X;
+    const GAP_COLS = 0.4; // tight gap between the big "3" and "0" so they read as one block
+    const totalW = (5 + GAP_COLS + 5) * CELL_X;
     const originX = LOGICAL_W / 2 - totalW / 2;
     const originY = 30;
     DIGIT_3.forEach((row, r) => {
@@ -257,7 +258,7 @@
     DIGIT_0.forEach((row, r) => {
       row.forEach((v, c) => {
         if (!v) return;
-        cells.push({ x: originX + (6 + c) * CELL_X, y: originY + r * CELL_Y, type: '0', color: COLOR_0 });
+        cells.push({ x: originX + (5 + GAP_COLS + c) * CELL_X, y: originY + r * CELL_Y, type: '0', color: COLOR_0 });
       });
     });
     return cells;
@@ -276,7 +277,7 @@
   let boss = null;
   let bossOffsetT = 0;
   let killCount = 0;
-  const WAVE_TARGET = 45;
+  const WAVE_TARGET = 60;
   let spawnTimer = 0;
   let fireTimer = 0;
   let bossFireTimer = 0;
@@ -452,7 +453,7 @@
       // spawn regular enemies (a single "30" chunk each) until wave target reached
       spawnTimer -= dt;
       if (spawnTimer <= 0 && killCount < WAVE_TARGET) {
-        spawnTimer = 0.5;
+        spawnTimer = 0.38;
         const type = Math.random() < 0.5 ? '3' : '0';
         const ramp = 1 + (killCount / WAVE_TARGET) * 0.5; // wave gets faster as it drains
         // pink "3" zigzags side to side (Galaga-style dodge), cyan "0" slowly
@@ -663,7 +664,7 @@
     bgStars.push({
       x: Math.random() * LOGICAL_W,
       y: Math.random() * LOGICAL_H,
-      vy: 50 + Math.random() * 90,
+      vy: 110 + Math.random() * 160,
       size: 16 + Math.random() * 26,
       alpha: 0.05 + Math.random() * 0.07,
       color: BG_COLORS[Math.floor(Math.random() * BG_COLORS.length)],
@@ -706,7 +707,7 @@
   function drawPlayerShip(x, y) {
     const wingAngle = -Math.PI / 2;
     const k = Math.SQRT1_2; // cos45 = sin45, so dx/dy split evenly
-    const d1 = 22, d2 = 40;
+    const d1 = 20, d2 = 32;
     // left wing (2 glyphs) swept back-left at 45 degrees, mirrored on the right —
     // started further out so they clear the fuselage's back "0"s instead of overlapping
     drawGlyphRotated('3', x - d1 * k, y + d1 * k, 13, '#ffd166', wingAngle, false);
@@ -765,27 +766,39 @@
 
       beams.forEach(drawBeam);
 
+      // one rainbow gradient spanning the whole boss, same look as regular enemies
+      let bossMinX = Infinity, bossMaxX = -Infinity;
+      boss.cells.forEach(c => {
+        if (c.x < bossMinX) bossMinX = c.x;
+        if (c.x > bossMaxX) bossMaxX = c.x;
+      });
+      const bossGrad = ctx.createLinearGradient(bossMinX + dx, 0, bossMaxX + dx + CELL_X, 0);
+      bossGrad.addColorStop(0, '#ff6ec7');
+      bossGrad.addColorStop(0.5, '#ffd166');
+      bossGrad.addColorStop(1, '#6ee7ff');
+
       boss.cells.forEach(c => {
         const jitter = dying ? (1 - deathK) * 10 : 0;
         const jx = jitter ? (Math.random() - 0.5) * jitter : 0;
         const jy = jitter ? (Math.random() - 0.5) * jitter : 0;
         if (dying) ctx.globalAlpha = deathK;
-        drawGlyph('30', c.x + dx + CELL_X / 2 + jx, c.y + dy + CELL_Y / 2 + jy, BOSS_FONT, c.color);
+        drawGlyph('30', c.x + dx + CELL_X / 2 + jx, c.y + dy + CELL_Y / 2 + jy, BOSS_FONT, bossGrad);
         if (dying) ctx.globalAlpha = 1;
       });
       bossBullets.forEach(b => drawGlyph(b.ch, b.x, b.y, 12, '#ff5a5a'));
 
       if (!dying) {
-        // boss HP bar (one shared pool, not per-cell)
+        // boss HP bar (one shared pool, not per-cell) — kept well below the
+        // HUD score row so the two never overlap
         const pct = boss.hp / boss.maxHp;
-        ctx.fillStyle = 'rgba(255,255,255,0.12)';
-        ctx.fillRect(30, 12, LOGICAL_W - 60, 8);
-        ctx.fillStyle = pct > 0.3 ? '#ff6ec7' : '#ff5a5a';
-        ctx.fillRect(30, 12, (LOGICAL_W - 60) * pct, 8);
         ctx.font = `10px ${GLYPH_FONT}`;
         ctx.fillStyle = '#a89bd6';
         ctx.textAlign = 'center';
-        ctx.fillText('BOSS', LOGICAL_W / 2, 8);
+        ctx.fillText('BOSS', LOGICAL_W / 2, 38);
+        ctx.fillStyle = 'rgba(255,255,255,0.12)';
+        ctx.fillRect(30, 44, LOGICAL_W - 60, 8);
+        ctx.fillStyle = pct > 0.3 ? '#ff6ec7' : '#ff5a5a';
+        ctx.fillRect(30, 44, (LOGICAL_W - 60) * pct, 8);
       }
     }
 
