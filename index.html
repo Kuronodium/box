@@ -323,20 +323,40 @@
       if (spawnTimer <= 0 && killCount < WAVE_TARGET) {
         spawnTimer = 0.5;
         const type = Math.random() < 0.5 ? '3' : '0';
+        const ramp = 1 + (killCount / WAVE_TARGET) * 0.5; // wave gets faster as it drains
+        // pink "3" zigzags side to side (Galaga-style dodge), cyan "0" slowly
+        // homes in on the player (seeker-missile style) — the color that scores
+        // a bigger combo also reads as the riskier one to leave alive.
+        const pattern = type === '3' ? 'zigzag' : 'home';
         enemies.push({
           x: 30 + Math.random() * (LOGICAL_W - 60),
           y: -16,
-          vy: 55 + Math.random() * 65,
+          vy: (55 + Math.random() * 65) * ramp,
           wob: Math.random() * Math.PI * 2,
           type,
           color: type === '3' ? COLOR_3 : COLOR_0,
           r: 17,
+          pattern,
+          vx: pattern === 'zigzag' ? (Math.random() < 0.5 ? -1 : 1) * (75 + Math.random() * 45) : 0,
+          zigTimer: 0.4 + Math.random() * 0.3,
         });
       }
       enemies.forEach(e => {
         e.wob += dt * 2;
         e.y += e.vy * dt;
-        e.x += Math.sin(e.wob) * 0.6;
+        if (e.pattern === 'zigzag') {
+          e.zigTimer -= dt;
+          if (e.zigTimer <= 0) { e.vx *= -1; e.zigTimer = 0.4 + Math.random() * 0.35; }
+          e.x += e.vx * dt;
+          if (e.x < 22) { e.x = 22; e.vx = Math.abs(e.vx); }
+          if (e.x > LOGICAL_W - 22) { e.x = LOGICAL_W - 22; e.vx = -Math.abs(e.vx); }
+        } else if (e.pattern === 'home') {
+          const toPlayer = player.x - e.x;
+          const step = Math.max(-80, Math.min(80, toPlayer * 1.6)) * dt;
+          e.x += step;
+        } else {
+          e.x += Math.sin(e.wob) * 0.6;
+        }
       });
       enemies = enemies.filter(e => e.y < LOGICAL_H + 20);
 
