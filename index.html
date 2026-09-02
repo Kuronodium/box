@@ -227,8 +227,8 @@
 
   // ---- Explosion particles: scattered small 3/0 glyphs ----
   let particles = [];
-  function spawnExplosion(x, y, color) {
-    for (let i = 0; i < 8; i++) {
+  function spawnExplosion(x, y, color, count) {
+    for (let i = 0; i < (count || 8); i++) {
       const a = Math.random() * Math.PI * 2;
       const spd = 60 + Math.random() * 160;
       particles.push({
@@ -462,11 +462,12 @@
         enemies.push({
           x: 30 + Math.random() * (LOGICAL_W - 60),
           y: -16,
-          vy: (55 + Math.random() * 65) * ramp,
+          vy: (90 + Math.random() * 100) * ramp,
           wob: Math.random() * Math.PI * 2,
           type,
           color: type === '3' ? COLOR_3 : COLOR_0,
           r: 17,
+          hp: 2,
           pattern,
           vx: pattern === 'zigzag' ? (Math.random() < 0.5 ? -1 : 1) * (75 + Math.random() * 45) : 0,
           zigTimer: 0.4 + Math.random() * 0.3,
@@ -516,15 +517,21 @@
       }
       enemyBullets = enemyBullets.filter(b => !b.hit);
 
-      // bullet vs enemy
+      // bullet vs enemy (2 hits to kill)
       for (const e of enemies) {
         for (const b of bullets) {
           if (b.hit) continue;
           if (dist(b.x, b.y, e.x, e.y) < e.r) {
             b.hit = true;
-            e.dead = true;
-            spawnExplosion(e.x, e.y, e.color);
-            registerKill(10);
+            e.hp -= 1;
+            if (e.hp <= 0) {
+              e.dead = true;
+              spawnExplosion(e.x, e.y, e.color);
+              registerKill(10);
+            } else {
+              spawnExplosion(b.x, b.y, e.color, 3);
+              playKill();
+            }
           }
         }
       }
@@ -664,8 +671,8 @@
     bgStars.push({
       x: Math.random() * LOGICAL_W,
       y: Math.random() * LOGICAL_H,
-      vy: 110 + Math.random() * 160,
-      size: 16 + Math.random() * 26,
+      vy: 220 + Math.random() * 320,
+      size: 16 + Math.random() * 70,
       alpha: 0.05 + Math.random() * 0.07,
       color: BG_COLORS[Math.floor(Math.random() * BG_COLORS.length)],
     });
@@ -673,8 +680,8 @@
   function updateBgStars(dt) {
     bgStars.forEach(s => {
       s.y += s.vy * dt;
-      if (s.y > LOGICAL_H + 30) {
-        s.y = -30;
+      if (s.y > LOGICAL_H + s.size) {
+        s.y = -s.size;
         s.x = Math.random() * LOGICAL_W;
       }
     });
