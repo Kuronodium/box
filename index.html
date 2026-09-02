@@ -465,7 +465,7 @@
         const maxHp = cells.length * 5;
         boss = { cells, maxHp, hp: maxHp };
         bossFireTimer = 1;
-        beamGroupTimer = 2.2;
+        beamGroupTimer = 1.4;
       }
     } else {
       // boss movement
@@ -486,20 +486,18 @@
       bossBullets.forEach(b => b.y += b.vy * dt);
       bossBullets = bossBullets.filter(b => b.y < LOGICAL_H + 20);
 
-      // beam volleys: several angled beams at once, each telegraphed first
+      // beam volleys: always a 3-way fan, telegraphed before firing
       if (beams.length === 0) {
         beamGroupTimer -= dt;
         if (beamGroupTimer <= 0) {
-          const count = 2 + Math.floor(Math.random() * 2); // 2-3 beams
-          const spread = (Math.PI / 180) * 22;
+          const spread = (Math.PI / 180) * 24;
           const center = (Math.random() - 0.5) * (Math.PI / 180) * 30;
-          for (let i = 0; i < count; i++) {
-            const angle = center + (i - (count - 1) / 2) * spread + (Math.random() - 0.5) * 0.08;
+          for (let i = 0; i < 3; i++) {
+            const angle = center + (i - 1) * spread + (Math.random() - 0.5) * 0.08;
             beams.push({ x: bossCx, y: bossCy, angle, phase: 'warn', t: 0.85, width: 30 });
           }
         }
       } else {
-        let allDone = true;
         beams.forEach(b => {
           b.t -= dt;
           if (b.phase === 'warn' && b.t <= 0) {
@@ -514,10 +512,9 @@
               hitPlayer();
             }
           }
-          if (!(b.phase === 'active' && b.t <= 0)) allDone = false;
         });
         beams = beams.filter(b => !(b.phase === 'active' && b.t <= 0));
-        if (beams.length === 0) beamGroupTimer = 3 + Math.random() * 1.4;
+        if (beams.length === 0) beamGroupTimer = 1.4 + Math.random() * 0.8;
       }
 
       // bullet vs boss: one shared HP pool — cells take hits but never disappear
