@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <title>30 ASSAULT</title>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=DotGothic16&family=Zen+Kaku+Gothic+New:wght@500;700;900&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@500;700;800&family=Zen+Kaku+Gothic+New:wght@500;700;900&display=swap">
 <style>
   html, body {
     margin: 0;
@@ -35,7 +35,7 @@
     display: flex;
     justify-content: space-between;
     padding: 12px 18px;
-    font-family: 'DotGothic16', monospace;
+    font-family: 'JetBrains Mono', monospace;
     font-size: 14px;
     letter-spacing: 1px;
     pointer-events: none;
@@ -58,7 +58,7 @@
   }
   #overlay.hidden { display: none; }
   #overlay h1 {
-    font-family: 'DotGothic16', monospace;
+    font-family: 'JetBrains Mono', monospace;
     font-size: 22px;
     margin: 0;
     letter-spacing: 2px;
@@ -69,7 +69,7 @@
   }
   #overlay p { font-size: 14px; line-height: 1.7; margin: 0; color: #a89bd6; max-width: 30ch; }
   #overlay button {
-    font-family: 'DotGothic16', monospace;
+    font-family: 'JetBrains Mono', monospace;
     font-size: 16px;
     letter-spacing: 1px;
     padding: 13px 32px;
@@ -118,7 +118,7 @@
   window.addEventListener('resize', resize);
   resize();
 
-  const GLYPH_FONT = "'DotGothic16', monospace";
+  const GLYPH_FONT = "'JetBrains Mono', monospace";
   const COLOR_3 = '#ff6ec7';
   const COLOR_0 = '#6ee7ff';
 
@@ -141,7 +141,7 @@
     [1,0,0,0,1],
     [0,1,1,1,0],
   ];
-  const CELL = 20;
+  const CELL = 26;
 
   // ---- Life icon: a heart drawn from '0' glyph cells ----
   const HEART_PATTERN = [
@@ -160,6 +160,24 @@
         drawGlyph('0', ox + c * cell, oy + r * cell, cell * 1.7, color);
       });
     });
+  }
+
+  // ---- Explosion particles: scattered small 3/0 glyphs ----
+  let particles = [];
+  function spawnExplosion(x, y, color) {
+    for (let i = 0; i < 8; i++) {
+      const a = Math.random() * Math.PI * 2;
+      const spd = 60 + Math.random() * 160;
+      particles.push({
+        x, y,
+        vx: Math.cos(a) * spd,
+        vy: Math.sin(a) * spd,
+        ch: Math.random() < 0.5 ? '3' : '0',
+        color,
+        life: 0.45,
+        maxLife: 0.45,
+      });
+    }
   }
 
   function buildBossCells() {
@@ -201,6 +219,8 @@
   let invincibleT = 0;
   let beam = null;          // { x, phase: 'warn'|'active', t }
   let beamTimer = 0;
+  let playerBulletToggle = false;
+  let bossBulletToggle = false;
 
   function resetGame() {
     score = 0; life = 3; combo = 0; lastKillType = null;
@@ -208,6 +228,7 @@
     boss = null; bossOffsetT = 0; killCount = 0;
     spawnTimer = 0; fireTimer = 0; bossFireTimer = 0; invincibleT = 1;
     beam = null; beamTimer = 2.5;
+    particles = []; playerBulletToggle = false; bossBulletToggle = false;
     player.x = LOGICAL_W / 2; player.y = LOGICAL_H - 70;
     state = 'playing';
     updateHud();
@@ -278,29 +299,38 @@
     if (state !== 'playing') return;
     if (invincibleT > 0) invincibleT -= dt;
 
-    // player auto-fire
+    // player auto-fire (alternates 3 / 0)
     fireTimer -= dt;
     if (fireTimer <= 0) {
       fireTimer = 0.16;
-      bullets.push({ x: player.x, y: player.y - player.r, vy: -420 });
+      bullets.push({ x: player.x, y: player.y - player.r, vy: -420, ch: playerBulletToggle ? '0' : '3' });
+      playerBulletToggle = !playerBulletToggle;
     }
     bullets.forEach(b => b.y += b.vy * dt);
     bullets = bullets.filter(b => b.y > -20);
 
+    // explosion particles
+    particles.forEach(p => {
+      p.x += p.vx * dt; p.y += p.vy * dt;
+      p.vx *= 0.92; p.vy *= 0.92;
+      p.life -= dt;
+    });
+    particles = particles.filter(p => p.life > 0);
+
     if (!boss) {
-      // spawn regular enemies until wave target reached
+      // spawn regular enemies (a single "30" chunk each) until wave target reached
       spawnTimer -= dt;
       if (spawnTimer <= 0 && killCount < WAVE_TARGET) {
-        spawnTimer = 0.45;
+        spawnTimer = 0.5;
         const type = Math.random() < 0.5 ? '3' : '0';
         enemies.push({
-          x: 24 + Math.random() * (LOGICAL_W - 48),
+          x: 30 + Math.random() * (LOGICAL_W - 60),
           y: -16,
-          vy: 60 + Math.random() * 70,
+          vy: 55 + Math.random() * 65,
           wob: Math.random() * Math.PI * 2,
           type,
           color: type === '3' ? COLOR_3 : COLOR_0,
-          r: 13,
+          r: 17,
         });
       }
       enemies.forEach(e => {
@@ -317,6 +347,7 @@
           if (dist(b.x, b.y, e.x, e.y) < e.r) {
             b.hit = true;
             e.dead = true;
+            spawnExplosion(e.x, e.y, e.color);
             registerKill(e.type, 10);
           }
         }
@@ -352,7 +383,8 @@
         const alive = boss.cells.filter(c => c.alive);
         if (alive.length) {
           const c = alive[Math.floor(Math.random() * alive.length)];
-          bossBullets.push({ x: c.x + dx + CELL / 2, y: c.y + dy + CELL / 2, vy: 180 });
+          bossBullets.push({ x: c.x + dx + CELL / 2, y: c.y + dy + CELL / 2, vy: 180, ch: bossBulletToggle ? '0' : '3' });
+          bossBulletToggle = !bossBulletToggle;
         }
       }
       bossBullets.forEach(b => b.y += b.vy * dt);
@@ -389,6 +421,7 @@
           if (Math.abs(b.x - cx) < CELL / 2 && Math.abs(b.y - cy) < CELL / 2) {
             b.hit = true;
             c.alive = false;
+            spawnExplosion(cx, cy, c.color);
             registerKill(c.type, 20);
           }
         }
@@ -444,10 +477,10 @@
     }
 
     // player bullets
-    bullets.forEach(b => drawGlyph('3', b.x, b.y, 14, '#ffffff'));
+    bullets.forEach(b => drawGlyph(b.ch, b.x, b.y, 14, '#ffffff'));
 
     if (!boss) {
-      enemies.forEach(e => drawGlyph(e.type, e.x, e.y, 22, e.color));
+      enemies.forEach(e => drawGlyph('30', e.x, e.y, 18, e.color));
     } else {
       const dx = boss._dx || 0, dy = boss._dy || 0;
 
@@ -468,9 +501,9 @@
 
       boss.cells.forEach(c => {
         if (!c.alive) return;
-        drawGlyph(c.type, c.x + dx + CELL / 2, c.y + dy + CELL / 2, 16, c.color);
+        drawGlyph('30', c.x + dx + CELL / 2, c.y + dy + CELL / 2, 11, c.color);
       });
-      bossBullets.forEach(b => drawGlyph('3', b.x, b.y, 12, '#ff5a5a'));
+      bossBullets.forEach(b => drawGlyph(b.ch, b.x, b.y, 12, '#ff5a5a'));
 
       // boss HP bar
       const remaining = boss.cells.filter(c => c.alive).length;
@@ -484,6 +517,13 @@
       ctx.textAlign = 'center';
       ctx.fillText('BOSS', LOGICAL_W / 2, 8);
     }
+
+    // explosion particles
+    particles.forEach(p => {
+      ctx.globalAlpha = Math.max(p.life / p.maxLife, 0);
+      drawGlyph(p.ch, p.x, p.y, 11, p.color);
+    });
+    ctx.globalAlpha = 1;
 
     // life hearts (bottom-left, out of the way of boss HP bar / play field)
     for (let i = 0; i < 3; i++) {
