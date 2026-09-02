@@ -3,7 +3,8 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
-<title>HAPPY 30th BIRTHDAY - Cake Breaker</title>
+<title>30 ASSAULT</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=DotGothic16&family=Zen+Kaku+Gothic+New:wght@500;700;900&display=swap">
 <style>
   html, body {
     margin: 0;
@@ -12,8 +13,8 @@
     height: 100%;
     overflow: hidden;
     touch-action: none;
-    font-family: 'Segoe UI', 'Hiragino Sans', sans-serif;
-    color: #fff;
+    font-family: 'Zen Kaku Gothic New', 'Hiragino Sans', sans-serif;
+    color: #f3eeff;
   }
   #wrap {
     display: flex;
@@ -25,20 +26,25 @@
     background: linear-gradient(180deg, #1a0533 0%, #0d0221 100%);
     display: block;
     touch-action: none;
-    box-shadow: 0 0 30px rgba(255, 90, 190, 0.4);
+    box-shadow: 0 0 40px rgba(255, 110, 199, 0.35);
+    border-radius: 6px;
   }
   #hud {
     position: fixed;
     top: 0; left: 0; right: 0;
     display: flex;
     justify-content: space-between;
-    padding: 10px 16px;
+    padding: 12px 18px;
+    font-family: 'DotGothic16', monospace;
     font-size: 14px;
-    font-weight: bold;
-    pointer-events: none;
-    text-shadow: 0 0 4px #000;
     letter-spacing: 1px;
+    pointer-events: none;
+    text-shadow: 0 0 6px rgba(0,0,0,0.8);
+    font-variant-numeric: tabular-nums;
   }
+  #hud .score { color: #ffd166; }
+  #hud .combo { color: #6ee7ff; }
+  #hud .life { color: #ff6ec7; }
   #overlay {
     position: fixed;
     inset: 0;
@@ -47,55 +53,48 @@
     justify-content: center;
     align-items: center;
     text-align: center;
-    background: rgba(13, 2, 33, 0.85);
-    gap: 14px;
-    padding: 20px;
+    background: rgba(13,2,33,0.88);
+    gap: 16px;
+    padding: 24px;
   }
   #overlay.hidden { display: none; }
   #overlay h1 {
-    font-size: 26px;
+    font-family: 'DotGothic16', monospace;
+    font-size: 22px;
     margin: 0;
+    letter-spacing: 2px;
     background: linear-gradient(90deg, #ff6ec7, #ffd166, #6ee7ff);
     -webkit-background-clip: text;
     background-clip: text;
     color: transparent;
   }
-  #overlay p {
-    font-size: 14px;
-    line-height: 1.6;
-    margin: 0;
-    color: #dcd6f5;
-  }
+  #overlay p { font-size: 14px; line-height: 1.7; margin: 0; color: #a89bd6; max-width: 30ch; }
   #overlay button {
+    font-family: 'DotGothic16', monospace;
     font-size: 16px;
-    font-weight: bold;
-    padding: 12px 28px;
+    letter-spacing: 1px;
+    padding: 13px 32px;
     border-radius: 999px;
     border: none;
     background: linear-gradient(90deg, #ff6ec7, #ff9f43);
-    color: #1a0533;
-    box-shadow: 0 4px 14px rgba(255, 110, 199, 0.5);
+    color: #0d0221;
+    box-shadow: 0 4px 16px rgba(255,110,199,0.45);
   }
-  #overlay .sub {
-    font-size: 12px;
-    color: #9d94c9;
-  }
+  #overlay .sub { font-size: 12px; color: #a89bd6; opacity: 0.8; }
 </style>
 </head>
 <body>
-<div id="wrap">
-  <canvas id="game"></canvas>
-</div>
+<div id="wrap"><canvas id="game"></canvas></div>
 <div id="hud">
-  <span id="scoreText">SCORE: 0</span>
-  <span id="timeText">TIME: 30</span>
-  <span id="ballText">BALL: 30</span>
+  <span class="score" id="scoreText">SCORE: 0</span>
+  <span class="combo" id="comboText">COMBO: x1</span>
+  <span class="life" id="lifeText">LIFE: 3</span>
 </div>
 <div id="overlay">
-  <h1>HAPPY 30th BIRTHDAY</h1>
-  <p id="overlayMsg">ケーキ型ブロックを30個のボールで壊しまくれ!<br>30秒生き残るか、全部壊せばクリア。<br>ボールを全部落としたらゲームオーバー。</p>
+  <h1>30 ASSAULT</h1>
+  <p id="overlayMsg">敵はぜんぶ「3」と「0」。<br>同じ色を連続で撃つとコンボ倍率アップ。<br>「30」の姿をしたボスを倒せばクリア。<br>ライフが0になるとゲームオーバー。</p>
   <button id="startBtn">TAP TO START</button>
-  <p class="sub">画面をドラッグでパドル操作</p>
+  <p class="sub">画面をドラッグで自機移動(自動連射)</p>
 </div>
 
 <script>
@@ -107,8 +106,8 @@
   const overlayMsg = document.getElementById('overlayMsg');
   const startBtn = document.getElementById('startBtn');
   const scoreText = document.getElementById('scoreText');
-  const timeText = document.getElementById('timeText');
-  const ballText = document.getElementById('ballText');
+  const comboText = document.getElementById('comboText');
+  const lifeText = document.getElementById('lifeText');
 
   function resize() {
     const maxW = Math.min(window.innerWidth, 480);
@@ -122,111 +121,104 @@
   window.addEventListener('resize', resize);
   resize();
 
-  // ---- Cake-shaped block layout ----
-  const COLS = 13;
-  const BLOCK_W = LOGICAL_W / COLS;
-  const BLOCK_H = 16;
-  const TOP_Y = 46;
+  const GLYPH_FONT = "'DotGothic16', monospace";
+  const COLOR_3 = '#ff6ec7';
+  const COLOR_0 = '#6ee7ff';
 
-  // 1 = frosting, 2 = base, 3 = candle stick, 4 = flame
-  const CAKE_ROWS = [
-    [0,0,0,4,0,0,4,0,0,4,0,0,0],
-    [0,0,0,3,0,0,3,0,0,3,0,0,0],
-    [0,0,1,1,1,1,1,1,1,1,1,0,0],
-    [0,0,1,1,1,1,1,1,1,1,1,0,0],
-    [2,2,2,2,2,2,2,2,2,2,2,2,2],
-    [2,2,2,2,2,2,2,2,2,2,2,2,2],
-    [2,2,2,2,2,2,2,2,2,2,2,2,2],
-    [2,2,2,2,2,2,2,2,2,2,2,2,2],
+  // ---- Boss shape: digits "3" and "0" built out of glyph cells ----
+  const DIGIT_3 = [
+    [1,1,1,1,0],
+    [0,0,0,0,1],
+    [0,0,0,0,1],
+    [0,1,1,1,0],
+    [0,0,0,0,1],
+    [0,0,0,0,1],
+    [1,1,1,1,0],
   ];
-  const BLOCK_STYLES = {
-    1: { color: '#ff9fd6', score: 10 },  // frosting
-    2: { color: '#c98a55', score: 10 },  // base cake
-    3: { color: '#ffe08a', score: 20 },  // candle stick
-    4: { color: '#ff5a5a', score: 50 },  // flame (bonus)
-  };
+  const DIGIT_0 = [
+    [0,1,1,1,0],
+    [1,0,0,0,1],
+    [1,0,0,0,1],
+    [1,0,0,0,1],
+    [1,0,0,0,1],
+    [1,0,0,0,1],
+    [0,1,1,1,0],
+  ];
+  const CELL = 20;
 
-  let blocks = [];
-  function buildBlocks() {
-    blocks = [];
-    CAKE_ROWS.forEach((row, r) => {
-      row.forEach((type, c) => {
-        if (!type) return;
-        blocks.push({
-          x: c * BLOCK_W,
-          y: TOP_Y + r * BLOCK_H,
-          w: BLOCK_W - 2,
-          h: BLOCK_H - 2,
-          type,
-          alive: true,
-        });
+  function buildBossCells() {
+    const cells = [];
+    const totalW = (5 + 1 + 5) * CELL;
+    const originX = LOGICAL_W / 2 - totalW / 2;
+    const originY = 30;
+    DIGIT_3.forEach((row, r) => {
+      row.forEach((v, c) => {
+        if (!v) return;
+        cells.push({ x: originX + c * CELL, y: originY + r * CELL, type: '3', color: COLOR_3, alive: true });
       });
     });
-  }
-
-  // ---- Paddle ----
-  const paddle = { w: 64, h: 10, x: LOGICAL_W / 2 - 32, y: LOGICAL_H - 36 };
-
-  // ---- Balls ----
-  const BALL_R = 4;
-  const BALL_COUNT = 30;
-  let balls = [];
-  function spawnBalls() {
-    balls = [];
-    for (let i = 0; i < BALL_COUNT; i++) {
-      const angle = (Math.PI / 3) + Math.random() * (Math.PI / 3); // upward spread
-      const speed = 150 + Math.random() * 90;
-      balls.push({
-        x: paddle.x + paddle.w / 2 + (Math.random() - 0.5) * 40,
-        y: paddle.y - 10 - Math.random() * 60,
-        vx: Math.cos(angle) * speed * (Math.random() < 0.5 ? -1 : 1),
-        vy: -Math.sin(angle) * speed,
-        alive: true,
+    DIGIT_0.forEach((row, r) => {
+      row.forEach((v, c) => {
+        if (!v) return;
+        cells.push({ x: originX + (6 + c) * CELL, y: originY + r * CELL, type: '0', color: COLOR_0, alive: true });
       });
-    }
+    });
+    return cells;
   }
 
-  // ---- Game state ----
+  // ---- Player ----
+  const player = { x: LOGICAL_W / 2, y: LOGICAL_H - 70, r: 12 };
+
+  // ---- State ----
   let state = 'ready'; // ready | playing | clear | over
-  let score = 0;
-  let timeLeft = 30;
-  let aliveCount = BALL_COUNT;
-  let lastTime = 0;
+  let score = 0, life = 3, combo = 0, lastKillType = null;
+  let bullets = [];       // player bullets (glyph '0')
+  let bossBullets = [];   // boss bullets
+  let enemies = [];
+  let boss = null;
+  let bossOffsetT = 0;
+  let killCount = 0;
+  const WAVE_TARGET = 30;
+  let spawnTimer = 0;
+  let fireTimer = 0;
+  let bossFireTimer = 0;
+  let invincibleT = 0;
 
   function resetGame() {
-    buildBlocks();
-    spawnBalls();
-    score = 0;
-    timeLeft = 30;
-    aliveCount = BALL_COUNT;
+    score = 0; life = 3; combo = 0; lastKillType = null;
+    bullets = []; bossBullets = []; enemies = [];
+    boss = null; bossOffsetT = 0; killCount = 0;
+    spawnTimer = 0; fireTimer = 0; bossFireTimer = 0; invincibleT = 1;
+    player.x = LOGICAL_W / 2; player.y = LOGICAL_H - 70;
     state = 'playing';
     updateHud();
   }
 
   function updateHud() {
     scoreText.textContent = 'SCORE: ' + score;
-    timeText.textContent = 'TIME: ' + Math.ceil(timeLeft);
-    ballText.textContent = 'BALL: ' + aliveCount;
+    comboText.textContent = 'COMBO: x' + Math.max(1, combo);
+    lifeText.textContent = 'LIFE: ' + Math.max(0, life);
   }
 
   // ---- Input ----
-  function movePaddleTo(clientX) {
+  function movePlayerTo(clientX, clientY) {
     const rect = canvas.getBoundingClientRect();
-    const scale = LOGICAL_W / rect.width;
-    const localX = (clientX - rect.left) * scale;
-    paddle.x = Math.min(Math.max(localX - paddle.w / 2, 0), LOGICAL_W - paddle.w);
+    const scaleX = LOGICAL_W / rect.width;
+    const scaleY = LOGICAL_H / rect.height;
+    player.x = Math.min(Math.max((clientX - rect.left) * scaleX, player.r), LOGICAL_W - player.r);
+    player.y = Math.min(Math.max((clientY - rect.top) * scaleY, player.r + 60), LOGICAL_H - player.r);
   }
   canvas.addEventListener('touchmove', (e) => {
     e.preventDefault();
-    movePaddleTo(e.touches[0].clientX);
+    movePlayerTo(e.touches[0].clientX, e.touches[0].clientY);
   }, { passive: false });
   canvas.addEventListener('touchstart', (e) => {
-    movePaddleTo(e.touches[0].clientX);
+    movePlayerTo(e.touches[0].clientX, e.touches[0].clientY);
   }, { passive: false });
   canvas.addEventListener('mousemove', (e) => {
-    if (e.buttons > 0) movePaddleTo(e.clientX);
+    if (e.buttons > 0) movePlayerTo(e.clientX, e.clientY);
   });
-  canvas.addEventListener('mousedown', (e) => movePaddleTo(e.clientX));
+  canvas.addEventListener('mousedown', (e) => movePlayerTo(e.clientX, e.clientY));
 
   startBtn.addEventListener('click', () => {
     overlay.classList.add('hidden');
@@ -240,111 +232,191 @@
     overlay.classList.remove('hidden');
   }
 
-  // ---- Physics / update ----
-  function update(dt) {
-    if (state !== 'playing') return;
+  function dist(x1, y1, x2, y2) { return Math.hypot(x1 - x2, y1 - y2); }
 
-    timeLeft -= dt;
-    if (timeLeft <= 0) {
-      timeLeft = 0;
-      state = 'clear';
-      finishGame(true, false);
-      return;
-    }
-
-    for (const ball of balls) {
-      if (!ball.alive) continue;
-      ball.x += ball.vx * dt;
-      ball.y += ball.vy * dt;
-
-      if (ball.x - BALL_R < 0) { ball.x = BALL_R; ball.vx *= -1; }
-      if (ball.x + BALL_R > LOGICAL_W) { ball.x = LOGICAL_W - BALL_R; ball.vx *= -1; }
-      if (ball.y - BALL_R < 0) { ball.y = BALL_R; ball.vy *= -1; }
-
-      // paddle collision
-      if (ball.vy > 0 &&
-          ball.y + BALL_R >= paddle.y &&
-          ball.y + BALL_R <= paddle.y + paddle.h + 8 &&
-          ball.x >= paddle.x - BALL_R &&
-          ball.x <= paddle.x + paddle.w + BALL_R) {
-        const hitPos = (ball.x - (paddle.x + paddle.w / 2)) / (paddle.w / 2);
-        ball.vy = -Math.abs(ball.vy);
-        ball.vx = hitPos * 220;
-        ball.y = paddle.y - BALL_R;
-      }
-
-      // block collision
-      for (const block of blocks) {
-        if (!block.alive) continue;
-        if (ball.x + BALL_R > block.x && ball.x - BALL_R < block.x + block.w &&
-            ball.y + BALL_R > block.y && ball.y - BALL_R < block.y + block.h) {
-          block.alive = false;
-          score += BLOCK_STYLES[block.type].score;
-          ball.vy *= -1;
-          break;
-        }
-      }
-
-      // missed paddle -> ball lost
-      if (ball.y - BALL_R > LOGICAL_H) {
-        ball.alive = false;
-        aliveCount--;
-      }
-    }
-
-    if (blocks.every(b => !b.alive)) {
-      state = 'clear';
-      finishGame(true, true);
-      return;
-    }
-    if (aliveCount <= 0) {
-      state = 'over';
-      finishGame(false, false);
-      return;
-    }
-    updateHud();
+  function registerKill(type, baseScore) {
+    if (type === lastKillType) combo = Math.min(combo + 1, 10);
+    else combo = 1;
+    lastKillType = type;
+    score += baseScore * combo;
+    killCount++;
   }
 
-  function finishGame(cleared, allBlocksBroken) {
-    if (cleared) {
-      const bonus = allBlocksBroken ? Math.ceil(timeLeft) * 10 + 300 : Math.ceil(timeLeft) * 10;
-      score += bonus;
-      const best = Math.max(score, Number(localStorage.getItem('cakeBreakerHigh') || 0));
-      localStorage.setItem('cakeBreakerHigh', String(best));
-      const title = allBlocksBroken ? '30歳突入おめでとう!' : 'CLEAR!';
-      showOverlay(title,
-        `SCORE: ${score}<br>BONUS: +${bonus}<br>HIGH SCORE: ${best}`);
-    } else {
-      const best = Math.max(score, Number(localStorage.getItem('cakeBreakerHigh') || 0));
-      localStorage.setItem('cakeBreakerHigh', String(best));
-      showOverlay('GAME OVER',
-        `SCORE: ${score}<br>HIGH SCORE: ${best}`);
+  function hitPlayer() {
+    if (invincibleT > 0) return;
+    life--;
+    invincibleT = 1.2;
+    combo = 0;
+    lastKillType = null;
+    if (life <= 0) {
+      state = 'over';
+      const best = Math.max(score, Number(localStorage.getItem('assault30High') || 0));
+      localStorage.setItem('assault30High', String(best));
+      showOverlay('GAME OVER', `SCORE: ${score}<br>HIGH SCORE: ${best}`);
     }
+  }
+
+  function update(dt) {
+    if (state !== 'playing') return;
+    if (invincibleT > 0) invincibleT -= dt;
+
+    // player auto-fire
+    fireTimer -= dt;
+    if (fireTimer <= 0) {
+      fireTimer = 0.16;
+      bullets.push({ x: player.x, y: player.y - player.r, vy: -420 });
+    }
+    bullets.forEach(b => b.y += b.vy * dt);
+    bullets = bullets.filter(b => b.y > -20);
+
+    if (!boss) {
+      // spawn regular enemies until wave target reached
+      spawnTimer -= dt;
+      if (spawnTimer <= 0 && killCount < WAVE_TARGET) {
+        spawnTimer = 0.45;
+        const type = Math.random() < 0.5 ? '3' : '0';
+        enemies.push({
+          x: 24 + Math.random() * (LOGICAL_W - 48),
+          y: -16,
+          vy: 60 + Math.random() * 70,
+          wob: Math.random() * Math.PI * 2,
+          type,
+          color: type === '3' ? COLOR_3 : COLOR_0,
+          r: 13,
+        });
+      }
+      enemies.forEach(e => {
+        e.wob += dt * 2;
+        e.y += e.vy * dt;
+        e.x += Math.sin(e.wob) * 0.6;
+      });
+      enemies = enemies.filter(e => e.y < LOGICAL_H + 20);
+
+      // bullet vs enemy
+      for (const e of enemies) {
+        for (const b of bullets) {
+          if (b.hit) continue;
+          if (dist(b.x, b.y, e.x, e.y) < e.r) {
+            b.hit = true;
+            e.dead = true;
+            registerKill(e.type, 10);
+          }
+        }
+      }
+      enemies = enemies.filter(e => !e.dead);
+      bullets = bullets.filter(b => !b.hit);
+
+      // player vs enemy
+      for (const e of enemies) {
+        if (dist(player.x, player.y, e.x, e.y) < player.r + e.r) {
+          e.dead = true;
+          hitPlayer();
+        }
+      }
+      enemies = enemies.filter(e => !e.dead);
+
+      if (killCount >= WAVE_TARGET) {
+        boss = { cells: buildBossCells(), alive: buildBossCells().length };
+        boss.total = boss.alive;
+      }
+    } else {
+      // boss movement
+      bossOffsetT += dt;
+      const dx = Math.sin(bossOffsetT * 0.6) * 40;
+      const dy = Math.min(bossOffsetT * 30, 60);
+
+      // boss fire
+      bossFireTimer -= dt;
+      if (bossFireTimer <= 0) {
+        bossFireTimer = 0.9;
+        const alive = boss.cells.filter(c => c.alive);
+        if (alive.length) {
+          const c = alive[Math.floor(Math.random() * alive.length)];
+          bossBullets.push({ x: c.x + dx + CELL / 2, y: c.y + dy + CELL / 2, vy: 160 });
+        }
+      }
+      bossBullets.forEach(b => b.y += b.vy * dt);
+      bossBullets = bossBullets.filter(b => b.y < LOGICAL_H + 20);
+
+      // bullet vs boss cells
+      for (const c of boss.cells) {
+        if (!c.alive) continue;
+        for (const b of bullets) {
+          if (b.hit) continue;
+          const cx = c.x + dx + CELL / 2, cy = c.y + dy + CELL / 2;
+          if (Math.abs(b.x - cx) < CELL / 2 && Math.abs(b.y - cy) < CELL / 2) {
+            b.hit = true;
+            c.alive = false;
+            registerKill(c.type, 20);
+          }
+        }
+      }
+      bullets = bullets.filter(b => !b.hit);
+
+      // player vs boss bullets
+      for (const b of bossBullets) {
+        if (dist(player.x, player.y, b.x, b.y) < player.r + 5) {
+          b.hit = true;
+          hitPlayer();
+        }
+      }
+      bossBullets = bossBullets.filter(b => !b.hit);
+
+      boss._dx = dx; boss._dy = dy;
+      const remaining = boss.cells.filter(c => c.alive).length;
+      if (remaining <= 0 && state === 'playing') {
+        const bonus = 1000;
+        score += bonus;
+        state = 'clear';
+        const best = Math.max(score, Number(localStorage.getItem('assault30High') || 0));
+        localStorage.setItem('assault30High', String(best));
+        showOverlay('30歳突入おめでとう！', `SCORE: ${score}<br>BOSS BONUS: +${bonus}<br>HIGH SCORE: ${best}`);
+      }
+    }
+
     updateHud();
   }
 
   // ---- Render ----
+  function drawGlyph(ch, x, y, size, color) {
+    ctx.font = `bold ${size}px ${GLYPH_FONT}`;
+    ctx.fillStyle = color;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(ch, x, y);
+  }
+
   function draw() {
     ctx.clearRect(0, 0, LOGICAL_W, LOGICAL_H);
 
-    for (const block of blocks) {
-      if (!block.alive) continue;
-      ctx.fillStyle = BLOCK_STYLES[block.type].color;
-      ctx.fillRect(block.x + 1, block.y + 1, block.w, block.h);
+    // player
+    const flashing = invincibleT > 0 && Math.floor(invincibleT * 12) % 2 === 0;
+    if (!flashing) {
+      ctx.beginPath();
+      ctx.moveTo(player.x, player.y - player.r);
+      ctx.lineTo(player.x - player.r, player.y + player.r);
+      ctx.lineTo(player.x + player.r, player.y + player.r);
+      ctx.closePath();
+      ctx.fillStyle = '#ffd166';
+      ctx.fill();
     }
 
-    ctx.fillStyle = '#6ee7ff';
-    ctx.fillRect(paddle.x, paddle.y, paddle.w, paddle.h);
+    // player bullets
+    bullets.forEach(b => drawGlyph('0', b.x, b.y, 14, '#ffffff'));
 
-    ctx.fillStyle = '#ffffff';
-    for (const ball of balls) {
-      if (!ball.alive) continue;
-      ctx.beginPath();
-      ctx.arc(ball.x, ball.y, BALL_R, 0, Math.PI * 2);
-      ctx.fill();
+    if (!boss) {
+      enemies.forEach(e => drawGlyph(e.type, e.x, e.y, 22, e.color));
+    } else {
+      const dx = boss._dx || 0, dy = boss._dy || 0;
+      boss.cells.forEach(c => {
+        if (!c.alive) return;
+        drawGlyph(c.type, c.x + dx + CELL / 2, c.y + dy + CELL / 2, 16, c.color);
+      });
+      bossBullets.forEach(b => drawGlyph('0', b.x, b.y, 12, '#ff5a5a'));
     }
   }
 
+  let lastTime = 0;
   function loop(t) {
     if (!lastTime) lastTime = t;
     const dt = Math.min((t - lastTime) / 1000, 0.033);
@@ -354,7 +426,6 @@
     requestAnimationFrame(loop);
   }
 
-  buildBlocks();
   draw();
   requestAnimationFrame(loop);
 })();
