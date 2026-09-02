@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <title>30 ASSAULT</title>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@500;700;800&family=Zen+Kaku+Gothic+New:wght@500;700;900&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Silkscreen:wght@400;700&display=swap">
 <style>
   html, body {
     margin: 0;
@@ -13,7 +13,7 @@
     height: 100%;
     overflow: hidden;
     touch-action: none;
-    font-family: 'Zen Kaku Gothic New', 'Hiragino Sans', sans-serif;
+    font-family: 'Silkscreen', monospace;
     color: #f3eeff;
   }
   #wrap {
@@ -35,7 +35,7 @@
     display: flex;
     justify-content: space-between;
     padding: 12px 18px;
-    font-family: 'JetBrains Mono', monospace;
+    font-family: 'Silkscreen', monospace;
     font-size: 14px;
     letter-spacing: 1px;
     pointer-events: none;
@@ -57,7 +57,7 @@
   }
   #overlay.hidden { display: none; }
   #overlay h1 {
-    font-family: 'JetBrains Mono', monospace;
+    font-family: 'Silkscreen', monospace;
     font-size: 132px;
     line-height: 1;
     margin: 0;
@@ -70,7 +70,7 @@
     filter: drop-shadow(0 0 26px rgba(255, 110, 199, 0.55));
   }
   #overlay .status {
-    font-family: 'JetBrains Mono', monospace;
+    font-family: 'Silkscreen', monospace;
     font-size: 18px;
     letter-spacing: 2px;
     margin: 0;
@@ -78,7 +78,7 @@
   }
   #overlay p#overlayMsg { font-size: 14px; line-height: 1.7; margin: 0; color: #a89bd6; }
   #overlay button {
-    font-family: 'JetBrains Mono', monospace;
+    font-family: 'Silkscreen', monospace;
     font-size: 16px;
     letter-spacing: 1px;
     padding: 13px 32px;
@@ -130,7 +130,7 @@
   window.addEventListener('resize', resize);
   resize();
 
-  const GLYPH_FONT = "'JetBrains Mono', monospace";
+  const GLYPH_FONT = "'Silkscreen', monospace";
   const COLOR_3 = '#ff6ec7';
   const COLOR_0 = '#6ee7ff';
 
@@ -153,7 +153,8 @@
     [1,0,0,0,1],
     [0,1,1,1,0],
   ];
-  const CELL = 19; // tighter cell pitch than the glyph size, so cells overlap into one solid mass
+  const CELL = 32;
+  const BOSS_FONT = 19;
 
   // ---- Life icon: a heart drawn from '0' glyph cells ----
   const HEART_PATTERN = [
@@ -230,17 +231,24 @@
   let fireTimer = 0;
   let bossFireTimer = 0;
   let invincibleT = 0;
-  let beam = null;          // { x, phase: 'warn'|'active', t }
-  let beamTimer = 0;
+  let beams = [];           // { x, y, angle, phase: 'warn'|'active', t, width }
+  let beamGroupTimer = 0;
   let playerBulletToggle = false;
   let bossBulletToggle = false;
+  let flashT = 0;
+  let shakeT = 0;
+  let bossDeathT = 0;
+  const BOSS_FLASH_DURATION = 0.3;
+  const BOSS_SHAKE_DURATION = 0.9;
+  const BOSS_DEATH_DURATION = 1.3;
 
   function resetGame() {
     score = 0; life = 3;
     bullets = []; bossBullets = []; enemyBullets = []; enemies = [];
     boss = null; bossOffsetT = 0; killCount = 0;
     spawnTimer = 0; fireTimer = 0; bossFireTimer = 0; invincibleT = 1;
-    beam = null; beamTimer = 2.5;
+    beams = []; beamGroupTimer = 2.5;
+    flashT = 0; shakeT = 0; bossDeathT = 0;
     particles = []; playerBulletToggle = false; bossBulletToggle = false;
     player.x = LOGICAL_W / 2; player.y = LOGICAL_H - 70;
     state = 'playing';
@@ -302,7 +310,50 @@
     }
   }
 
+  function updateParticles(dt) {
+    particles.forEach(p => {
+      p.x += p.vx * dt; p.y += p.vy * dt;
+      p.vx *= 0.92; p.vy *= 0.92;
+      p.life -= dt;
+    });
+    particles = particles.filter(p => p.life > 0);
+  }
+
+  // Boss defeated: freeze the fight, tremble + fade the boss while a huge
+  // burst of 3/0s scatters, then hand off to the clear screen.
+  function startBossDeath() {
+    state = 'bossDying';
+    bossDeathT = BOSS_DEATH_DURATION;
+    flashT = BOSS_FLASH_DURATION;
+    shakeT = BOSS_SHAKE_DURATION;
+    beams = [];
+    bossBullets = [];
+    const dx = boss._dx || 0, dy = boss._dy || 0;
+    boss.cells.forEach(c => {
+      spawnExplosion(c.x + dx + CELL / 2, c.y + dy + CELL / 2, c.color);
+    });
+  }
+
+  function finishBossClear() {
+    const bonus = 1000;
+    score += bonus;
+    state = 'clear';
+    const best = Math.max(score, Number(localStorage.getItem('assault30High') || 0));
+    localStorage.setItem('assault30High', String(best));
+    updateHud();
+    showOverlay('CLEAR', `SCORE: ${fmtScore(score)}<br>BOSS BONUS: +${fmtScore(bonus)}<br>HIGH SCORE: ${fmtScore(best)}`);
+  }
+
   function update(dt) {
+    if (flashT > 0) flashT = Math.max(0, flashT - dt);
+    if (shakeT > 0) shakeT = Math.max(0, shakeT - dt);
+
+    if (state === 'bossDying') {
+      updateParticles(dt);
+      bossDeathT -= dt;
+      if (bossDeathT <= 0) finishBossClear();
+      return;
+    }
     if (state !== 'playing') return;
     if (invincibleT > 0) invincibleT -= dt;
 
@@ -316,13 +367,7 @@
     bullets.forEach(b => b.y += b.vy * dt);
     bullets = bullets.filter(b => b.y > -20);
 
-    // explosion particles
-    particles.forEach(p => {
-      p.x += p.vx * dt; p.y += p.vy * dt;
-      p.vx *= 0.92; p.vy *= 0.92;
-      p.life -= dt;
-    });
-    particles = particles.filter(p => p.life > 0);
+    updateParticles(dt);
 
     if (!boss) {
       // spawn regular enemies (a single "30" chunk each) until wave target reached
@@ -417,48 +462,62 @@
 
       if (killCount >= WAVE_TARGET) {
         const cells = buildBossCells();
-        const maxHp = cells.length * 3;
+        const maxHp = cells.length * 5;
         boss = { cells, maxHp, hp: maxHp };
         bossFireTimer = 1;
-        beamTimer = 2.2;
+        beamGroupTimer = 2.2;
       }
     } else {
       // boss movement
       bossOffsetT += dt;
       const dx = Math.sin(bossOffsetT * 0.6) * 40;
       const dy = Math.min(bossOffsetT * 30, 60);
+      const bossCx = LOGICAL_W / 2 + dx;
+      const bossCy = 30 + (7 * CELL) / 2 + dy;
 
       // boss fire (aimed shots)
       bossFireTimer -= dt;
       if (bossFireTimer <= 0) {
-        bossFireTimer = 0.7;
+        bossFireTimer = 0.5;
         const c = boss.cells[Math.floor(Math.random() * boss.cells.length)];
-        bossBullets.push({ x: c.x + dx + CELL / 2, y: c.y + dy + CELL / 2, vy: 180, ch: bossBulletToggle ? '0' : '3' });
+        bossBullets.push({ x: c.x + dx + CELL / 2, y: c.y + dy + CELL / 2, vy: 190, ch: bossBulletToggle ? '0' : '3' });
         bossBulletToggle = !bossBulletToggle;
       }
       bossBullets.forEach(b => b.y += b.vy * dt);
       bossBullets = bossBullets.filter(b => b.y < LOGICAL_H + 20);
 
-      // beam attack: telegraph then a wide damaging column
-      if (!beam) {
-        beamTimer -= dt;
-        if (beamTimer <= 0) {
-          beam = { x: 30 + Math.random() * (LOGICAL_W - 60), phase: 'warn', t: 0.7, width: 34 };
+      // beam volleys: several angled beams at once, each telegraphed first
+      if (beams.length === 0) {
+        beamGroupTimer -= dt;
+        if (beamGroupTimer <= 0) {
+          const count = 2 + Math.floor(Math.random() * 2); // 2-3 beams
+          const spread = (Math.PI / 180) * 22;
+          const center = (Math.random() - 0.5) * (Math.PI / 180) * 30;
+          for (let i = 0; i < count; i++) {
+            const angle = center + (i - (count - 1) / 2) * spread + (Math.random() - 0.5) * 0.08;
+            beams.push({ x: bossCx, y: bossCy, angle, phase: 'warn', t: 0.85, width: 30 });
+          }
         }
       } else {
-        beam.t -= dt;
-        if (beam.phase === 'warn' && beam.t <= 0) {
-          beam.phase = 'active';
-          beam.t = 0.35;
-        } else if (beam.phase === 'active') {
-          if (Math.abs(player.x - beam.x) < beam.width / 2 + player.r) {
-            hitPlayer();
+        let allDone = true;
+        beams.forEach(b => {
+          b.t -= dt;
+          if (b.phase === 'warn' && b.t <= 0) {
+            b.phase = 'active';
+            b.t = 0.4;
+          } else if (b.phase === 'active') {
+            const ddx = Math.sin(b.angle), ddy = Math.cos(b.angle);
+            const vx = player.x - b.x, vy = player.y - b.y;
+            const proj = vx * ddx + vy * ddy;
+            const perp = Math.abs(vx * ddy - vy * ddx);
+            if (proj > 0 && perp < b.width / 2 + player.r) {
+              hitPlayer();
+            }
           }
-          if (beam.t <= 0) {
-            beam = null;
-            beamTimer = 2.8 + Math.random() * 1.2;
-          }
-        }
+          if (!(b.phase === 'active' && b.t <= 0)) allDone = false;
+        });
+        beams = beams.filter(b => !(b.phase === 'active' && b.t <= 0));
+        if (beams.length === 0) beamGroupTimer = 3 + Math.random() * 1.4;
       }
 
       // bullet vs boss: one shared HP pool — cells take hits but never disappear
@@ -487,12 +546,7 @@
 
       boss._dx = dx; boss._dy = dy;
       if (boss.hp <= 0 && state === 'playing') {
-        const bonus = 1000;
-        score += bonus;
-        state = 'clear';
-        const best = Math.max(score, Number(localStorage.getItem('assault30High') || 0));
-        localStorage.setItem('assault30High', String(best));
-        showOverlay('30歳突入おめでとう！', `SCORE: ${fmtScore(score)}<br>BOSS BONUS: +${fmtScore(bonus)}<br>HIGH SCORE: ${fmtScore(best)}`);
+        startBossDeath();
       }
     }
 
@@ -539,12 +593,33 @@
     drawGlyph('0', x + 9, y + 6, 13, '#ffd166');
   }
 
+  // A beam is a stream of "30" glyphs along its direction — faint and sparse
+  // while telegraphing (phase 'warn'), solid once it's actually firing.
+  function drawBeam(b) {
+    const ddx = Math.sin(b.angle), ddy = Math.cos(b.angle);
+    const warn = b.phase === 'warn';
+    const length = 760, step = warn ? 30 : 24;
+    const size = warn ? 12 : 18;
+    ctx.globalAlpha = warn ? 0.3 : 1;
+    for (let i = 2; i * step <= length; i++) {
+      const px = b.x + ddx * step * i, py = b.y + ddy * step * i;
+      if (px < -20 || px > LOGICAL_W + 20 || py < -20 || py > LOGICAL_H + 20) continue;
+      drawGlyph('30', px, py, size, '#ff5a5a');
+    }
+    ctx.globalAlpha = 1;
+  }
+
   function draw() {
     ctx.clearRect(0, 0, LOGICAL_W, LOGICAL_H);
+    ctx.save();
+    if (shakeT > 0) {
+      const mag = 10 * (shakeT / BOSS_SHAKE_DURATION);
+      ctx.translate((Math.random() - 0.5) * mag * 2, (Math.random() - 0.5) * mag * 2);
+    }
 
     // player
     const flashing = invincibleT > 0 && Math.floor(invincibleT * 12) % 2 === 0;
-    if (!flashing) {
+    if (!flashing && state !== 'bossDying') {
       drawPlayerShip(player.x, player.y);
     }
 
@@ -557,37 +632,33 @@
       enemies.forEach(e => drawGlyph('30', e.x, e.y, 18, e.color));
     } else {
       const dx = boss._dx || 0, dy = boss._dy || 0;
+      const dying = state === 'bossDying';
+      const deathK = dying ? Math.max(0, bossDeathT / BOSS_DEATH_DURATION) : 1;
 
-      // beam telegraph / active column
-      if (beam) {
-        if (beam.phase === 'warn') {
-          ctx.fillStyle = 'rgba(255, 90, 90, 0.28)';
-          ctx.fillRect(beam.x - 2, 90, 4, LOGICAL_H - 90);
-        } else {
-          const grad = ctx.createLinearGradient(beam.x - beam.width / 2, 0, beam.x + beam.width / 2, 0);
-          grad.addColorStop(0, 'rgba(255,90,90,0)');
-          grad.addColorStop(0.5, 'rgba(255,90,90,0.85)');
-          grad.addColorStop(1, 'rgba(255,90,90,0)');
-          ctx.fillStyle = grad;
-          ctx.fillRect(beam.x - beam.width / 2, 90, beam.width, LOGICAL_H - 90);
-        }
-      }
+      beams.forEach(drawBeam);
 
       boss.cells.forEach(c => {
-        drawGlyph('30', c.x + dx + CELL / 2, c.y + dy + CELL / 2, 22, c.color);
+        const jitter = dying ? (1 - deathK) * 10 : 0;
+        const jx = jitter ? (Math.random() - 0.5) * jitter : 0;
+        const jy = jitter ? (Math.random() - 0.5) * jitter : 0;
+        if (dying) ctx.globalAlpha = deathK;
+        drawGlyph('30', c.x + dx + CELL / 2 + jx, c.y + dy + CELL / 2 + jy, BOSS_FONT, c.color);
+        if (dying) ctx.globalAlpha = 1;
       });
       bossBullets.forEach(b => drawGlyph(b.ch, b.x, b.y, 12, '#ff5a5a'));
 
-      // boss HP bar (one shared pool, not per-cell)
-      const pct = boss.hp / boss.maxHp;
-      ctx.fillStyle = 'rgba(255,255,255,0.12)';
-      ctx.fillRect(30, 12, LOGICAL_W - 60, 8);
-      ctx.fillStyle = pct > 0.3 ? '#ff6ec7' : '#ff5a5a';
-      ctx.fillRect(30, 12, (LOGICAL_W - 60) * pct, 8);
-      ctx.font = `10px ${GLYPH_FONT}`;
-      ctx.fillStyle = '#a89bd6';
-      ctx.textAlign = 'center';
-      ctx.fillText('BOSS', LOGICAL_W / 2, 8);
+      if (!dying) {
+        // boss HP bar (one shared pool, not per-cell)
+        const pct = boss.hp / boss.maxHp;
+        ctx.fillStyle = 'rgba(255,255,255,0.12)';
+        ctx.fillRect(30, 12, LOGICAL_W - 60, 8);
+        ctx.fillStyle = pct > 0.3 ? '#ff6ec7' : '#ff5a5a';
+        ctx.fillRect(30, 12, (LOGICAL_W - 60) * pct, 8);
+        ctx.font = `10px ${GLYPH_FONT}`;
+        ctx.fillStyle = '#a89bd6';
+        ctx.textAlign = 'center';
+        ctx.fillText('BOSS', LOGICAL_W / 2, 8);
+      }
     }
 
     // explosion particles
@@ -600,6 +671,13 @@
     // life hearts (bottom-left, out of the way of boss HP bar / play field)
     for (let i = 0; i < 3; i++) {
       drawHeart(10 + i * 24, LOGICAL_H - 24, i < life);
+    }
+
+    ctx.restore();
+
+    if (flashT > 0) {
+      ctx.fillStyle = `rgba(255,255,255,${(flashT / BOSS_FLASH_DURATION) * 0.8})`;
+      ctx.fillRect(0, 0, LOGICAL_W, LOGICAL_H);
     }
   }
 
