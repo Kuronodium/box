@@ -153,7 +153,8 @@
     [1,0,0,0,1],
     [0,1,1,1,0],
   ];
-  const CELL = 32;
+  const CELL_X = 30;
+  const CELL_Y = 22; // tighter than CELL_X so rows don't leave big vertical gaps
   const BOSS_FONT = 19;
 
   // ---- Life icon: a heart drawn from '0' glyph cells ----
@@ -173,6 +174,53 @@
         drawGlyph('0', ox + c * cell, oy + r * cell, cell * 1.7, color);
       });
     });
+  }
+
+  // ---- Sound effects (synthesized, no audio files) ----
+  let audioCtx = null;
+  function ensureAudio() {
+    if (!audioCtx) {
+      const AC = window.AudioContext || window.webkitAudioContext;
+      if (AC) audioCtx = new AC();
+    }
+    if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+  }
+  function beep(freqStart, freqEnd, duration, type, peakGain) {
+    if (!audioCtx) return;
+    const t0 = audioCtx.currentTime;
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.type = type;
+    osc.frequency.setValueAtTime(freqStart, t0);
+    osc.frequency.exponentialRampToValueAtTime(Math.max(freqEnd, 1), t0 + duration);
+    gain.gain.setValueAtTime(peakGain, t0);
+    gain.gain.exponentialRampToValueAtTime(0.001, t0 + duration);
+    osc.connect(gain).connect(audioCtx.destination);
+    osc.start(t0);
+    osc.stop(t0 + duration);
+  }
+  function playShoot() { beep(900, 500, 0.06, 'square', 0.05); }
+  function playKill() { beep(520, 140, 0.12, 'sawtooth', 0.08); }
+  function playExplosion() {
+    if (!audioCtx) return;
+    const t0 = audioCtx.currentTime;
+    const dur = 0.7;
+    const bufferSize = Math.floor(audioCtx.sampleRate * dur);
+    const buffer = audioCtx.createBuffer(1, bufferSize, audioCtx.sampleRate);
+    const data = buffer.getChannelData(0);
+    for (let i = 0; i < bufferSize; i++) data[i] = (Math.random() * 2 - 1) * (1 - i / bufferSize);
+    const noise = audioCtx.createBufferSource();
+    noise.buffer = buffer;
+    const filter = audioCtx.createBiquadFilter();
+    filter.type = 'lowpass';
+    filter.frequency.setValueAtTime(2000, t0);
+    filter.frequency.exponentialRampToValueAtTime(70, t0 + dur);
+    const gain = audioCtx.createGain();
+    gain.gain.setValueAtTime(0.6, t0);
+    gain.gain.exponentialRampToValueAtTime(0.001, t0 + dur);
+    noise.connect(filter).connect(gain).connect(audioCtx.destination);
+    noise.start(t0);
+    beep(160, 40, 0.5, 'sawtooth', 0.25);
   }
 
   // ---- Explosion particles: scattered small 3/0 glyphs ----
@@ -195,19 +243,19 @@
 
   function buildBossCells() {
     const cells = [];
-    const totalW = (5 + 1 + 5) * CELL;
+    const totalW = (5 + 1 + 5) * CELL_X;
     const originX = LOGICAL_W / 2 - totalW / 2;
     const originY = 30;
     DIGIT_3.forEach((row, r) => {
       row.forEach((v, c) => {
         if (!v) return;
-        cells.push({ x: originX + c * CELL, y: originY + r * CELL, type: '3', color: COLOR_3 });
+        cells.push({ x: originX + c * CELL_X, y: originY + r * CELL_Y, type: '3', color: COLOR_3 });
       });
     });
     DIGIT_0.forEach((row, r) => {
       row.forEach((v, c) => {
         if (!v) return;
-        cells.push({ x: originX + (6 + c) * CELL, y: originY + r * CELL, type: '0', color: COLOR_0 });
+        cells.push({ x: originX + (6 + c) * CELL_X, y: originY + r * CELL_Y, type: '0', color: COLOR_0 });
       });
     });
     return cells;
@@ -280,6 +328,7 @@
   canvas.addEventListener('mousedown', (e) => movePlayerTo(e.clientX, e.clientY));
 
   startBtn.addEventListener('click', () => {
+    ensureAudio();
     overlay.classList.add('hidden');
     resetGame();
   });
@@ -296,6 +345,7 @@
   function registerKill(baseScore) {
     score += baseScore;
     killCount++;
+    playKill();
   }
 
   function hitPlayer() {
@@ -328,9 +378,10 @@
     shakeT = BOSS_SHAKE_DURATION;
     beams = [];
     bossBullets = [];
+    playExplosion();
     const dx = boss._dx || 0, dy = boss._dy || 0;
     boss.cells.forEach(c => {
-      spawnExplosion(c.x + dx + CELL / 2, c.y + dy + CELL / 2, c.color);
+      spawnExplosion(c.x + dx + CELL_X / 2, c.y + dy + CELL_Y / 2, c.color);
     });
   }
 
@@ -363,6 +414,7 @@
       fireTimer = 0.16;
       bullets.push({ x: player.x, y: player.y - player.r, vy: -420, ch: playerBulletToggle ? '0' : '3' });
       playerBulletToggle = !playerBulletToggle;
+      playShoot();
     }
     bullets.forEach(b => b.y += b.vy * dt);
     bullets = bullets.filter(b => b.y > -20);
@@ -466,6 +518,10 @@
         boss = { cells, maxHp, hp: maxHp };
         bossFireTimer = 1;
         beamGroupTimer = 1.4;
+        // regular enemies/bullets stop updating once the boss branch takes
+        // over, so clear them out here instead of leaving them frozen mid-air
+        enemies = [];
+        enemyBullets = [];
       }
     } else {
       // boss movement
@@ -473,14 +529,14 @@
       const dx = Math.sin(bossOffsetT * 0.6) * 40;
       const dy = Math.min(bossOffsetT * 30, 60);
       const bossCx = LOGICAL_W / 2 + dx;
-      const bossCy = 30 + (7 * CELL) / 2 + dy;
+      const bossCy = 30 + (7 * CELL_Y) / 2 + dy;
 
       // boss fire (aimed shots)
       bossFireTimer -= dt;
       if (bossFireTimer <= 0) {
         bossFireTimer = 0.5;
         const c = boss.cells[Math.floor(Math.random() * boss.cells.length)];
-        bossBullets.push({ x: c.x + dx + CELL / 2, y: c.y + dy + CELL / 2, vy: 190, ch: bossBulletToggle ? '0' : '3' });
+        bossBullets.push({ x: c.x + dx + CELL_X / 2, y: c.y + dy + CELL_Y / 2, vy: 190, ch: bossBulletToggle ? '0' : '3' });
         bossBulletToggle = !bossBulletToggle;
       }
       bossBullets.forEach(b => b.y += b.vy * dt);
@@ -521,8 +577,8 @@
       for (const c of boss.cells) {
         for (const b of bullets) {
           if (b.hit) continue;
-          const cx = c.x + dx + CELL / 2, cy = c.y + dy + CELL / 2;
-          if (Math.abs(b.x - cx) < CELL / 2 && Math.abs(b.y - cy) < CELL / 2) {
+          const cx = c.x + dx + CELL_X / 2, cy = c.y + dy + CELL_Y / 2;
+          if (Math.abs(b.x - cx) < CELL_X / 2 && Math.abs(b.y - cy) < CELL_Y / 2) {
             b.hit = true;
             boss.hp = Math.max(0, boss.hp - 1);
             spawnExplosion(cx, cy, c.color);
@@ -574,20 +630,21 @@
     ctx.restore();
   }
 
-  // Player ship: a nose-cone triangle of four "0"s with two-glyph "3" wings
-  // per side, each "3" flipped so its open side faces down.
+  // Player ship: a nose-cone triangle of three "0"s (apex + two back corners)
+  // with two-glyph "3" wings per side, swept back along a 45-degree diagonal.
   function drawPlayerShip(x, y) {
     const wingAngle = -Math.PI / 2;
-    // left wing (2 cubes), then its mirror on the right
-    drawGlyphRotated('3', x - 19, y + 1, 15, '#ffd166', wingAngle, false);
-    drawGlyphRotated('3', x - 25, y + 8, 15, '#ffd166', wingAngle, false);
-    drawGlyphRotated('3', x + 19, y + 1, 15, '#ffd166', wingAngle, true);
-    drawGlyphRotated('3', x + 25, y + 8, 15, '#ffd166', wingAngle, true);
-    // center fuselage: a triangle built from four "0"s
+    const k = Math.SQRT1_2; // cos45 = sin45, so dx/dy split evenly
+    const d1 = 16, d2 = 28;
+    // left wing (2 glyphs) swept back-left at 45 degrees, mirrored on the right
+    drawGlyphRotated('3', x - d1 * k, y + d1 * k, 15, '#ffd166', wingAngle, false);
+    drawGlyphRotated('3', x - d2 * k, y + d2 * k, 15, '#ffd166', wingAngle, false);
+    drawGlyphRotated('3', x + d1 * k, y + d1 * k, 15, '#ffd166', wingAngle, true);
+    drawGlyphRotated('3', x + d2 * k, y + d2 * k, 15, '#ffd166', wingAngle, true);
+    // center fuselage: apex up front, two "0"s at the back
     drawGlyph('0', x, y - 11, 13, '#ffd166');
-    drawGlyph('0', x - 9, y + 6, 13, '#ffd166');
-    drawGlyph('0', x, y + 8, 13, '#ffd166');
-    drawGlyph('0', x + 9, y + 6, 13, '#ffd166');
+    drawGlyph('0', x - 9, y + 7, 13, '#ffd166');
+    drawGlyph('0', x + 9, y + 7, 13, '#ffd166');
   }
 
   // A beam is a stream of "30" glyphs along its direction — faint and sparse
@@ -639,7 +696,7 @@
         const jx = jitter ? (Math.random() - 0.5) * jitter : 0;
         const jy = jitter ? (Math.random() - 0.5) * jitter : 0;
         if (dying) ctx.globalAlpha = deathK;
-        drawGlyph('30', c.x + dx + CELL / 2 + jx, c.y + dy + CELL / 2 + jy, BOSS_FONT, c.color);
+        drawGlyph('30', c.x + dx + CELL_X / 2 + jx, c.y + dy + CELL_Y / 2 + jy, BOSS_FONT, c.color);
         if (dying) ctx.globalAlpha = 1;
       });
       bossBullets.forEach(b => drawGlyph(b.ch, b.x, b.y, 12, '#ff5a5a'));
