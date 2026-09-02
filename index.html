@@ -188,13 +188,13 @@
     DIGIT_3.forEach((row, r) => {
       row.forEach((v, c) => {
         if (!v) return;
-        cells.push({ x: originX + c * CELL, y: originY + r * CELL, type: '3', color: COLOR_3, alive: true });
+        cells.push({ x: originX + c * CELL, y: originY + r * CELL, type: '3', color: COLOR_3 });
       });
     });
     DIGIT_0.forEach((row, r) => {
       row.forEach((v, c) => {
         if (!v) return;
-        cells.push({ x: originX + (6 + c) * CELL, y: originY + r * CELL, type: '0', color: COLOR_0, alive: true });
+        cells.push({ x: originX + (6 + c) * CELL, y: originY + r * CELL, type: '0', color: COLOR_0 });
       });
     });
     return cells;
@@ -386,7 +386,8 @@
 
       if (killCount >= WAVE_TARGET) {
         const cells = buildBossCells();
-        boss = { cells, total: cells.length };
+        const maxHp = cells.length * 3;
+        boss = { cells, maxHp, hp: maxHp };
         bossFireTimer = 1;
         beamTimer = 2.2;
       }
@@ -400,12 +401,9 @@
       bossFireTimer -= dt;
       if (bossFireTimer <= 0) {
         bossFireTimer = 0.7;
-        const alive = boss.cells.filter(c => c.alive);
-        if (alive.length) {
-          const c = alive[Math.floor(Math.random() * alive.length)];
-          bossBullets.push({ x: c.x + dx + CELL / 2, y: c.y + dy + CELL / 2, vy: 180, ch: bossBulletToggle ? '0' : '3' });
-          bossBulletToggle = !bossBulletToggle;
-        }
+        const c = boss.cells[Math.floor(Math.random() * boss.cells.length)];
+        bossBullets.push({ x: c.x + dx + CELL / 2, y: c.y + dy + CELL / 2, vy: 180, ch: bossBulletToggle ? '0' : '3' });
+        bossBulletToggle = !bossBulletToggle;
       }
       bossBullets.forEach(b => b.y += b.vy * dt);
       bossBullets = bossBullets.filter(b => b.y < LOGICAL_H + 20);
@@ -432,15 +430,14 @@
         }
       }
 
-      // bullet vs boss cells
+      // bullet vs boss: one shared HP pool — cells take hits but never disappear
       for (const c of boss.cells) {
-        if (!c.alive) continue;
         for (const b of bullets) {
           if (b.hit) continue;
           const cx = c.x + dx + CELL / 2, cy = c.y + dy + CELL / 2;
           if (Math.abs(b.x - cx) < CELL / 2 && Math.abs(b.y - cy) < CELL / 2) {
             b.hit = true;
-            c.alive = false;
+            boss.hp = Math.max(0, boss.hp - 1);
             spawnExplosion(cx, cy, c.color);
             registerKill(c.type, 20);
           }
@@ -458,8 +455,7 @@
       bossBullets = bossBullets.filter(b => !b.hit);
 
       boss._dx = dx; boss._dy = dy;
-      const remaining = boss.cells.filter(c => c.alive).length;
-      if (remaining <= 0 && state === 'playing') {
+      if (boss.hp <= 0 && state === 'playing') {
         const bonus = 1000;
         score += bonus;
         state = 'clear';
@@ -520,14 +516,12 @@
       }
 
       boss.cells.forEach(c => {
-        if (!c.alive) return;
         drawGlyph('30', c.x + dx + CELL / 2, c.y + dy + CELL / 2, 11, c.color);
       });
       bossBullets.forEach(b => drawGlyph(b.ch, b.x, b.y, 12, '#ff5a5a'));
 
-      // boss HP bar
-      const remaining = boss.cells.filter(c => c.alive).length;
-      const pct = remaining / boss.total;
+      // boss HP bar (one shared pool, not per-cell)
+      const pct = boss.hp / boss.maxHp;
       ctx.fillStyle = 'rgba(255,255,255,0.12)';
       ctx.fillRect(30, 12, LOGICAL_W - 60, 8);
       ctx.fillStyle = pct > 0.3 ? '#ff6ec7' : '#ff5a5a';
