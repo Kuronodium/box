@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <title>30 ASSAULT</title>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@500;700;800&family=Zen+Kaku+Gothic+New:wght@500;700;900&display=swap">
-<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"></script>
 <style>
   html, body {
     margin: 0;
@@ -207,6 +207,12 @@
   // ================= Three.js voxel layer (characters only) =================
   // Falls back to flat 2D glyphs if the three.js CDN failed to load.
   const HAS_3D = typeof THREE !== 'undefined';
+  if (!HAS_3D) {
+    const badge = document.createElement('div');
+    badge.textContent = '2D FALLBACK (3D lib failed to load)';
+    badge.style.cssText = 'position:fixed;bottom:4px;right:6px;font:10px monospace;color:rgba(255,255,255,0.35);pointer-events:none;z-index:9;';
+    document.body.appendChild(badge);
+  }
   let renderer = null, scene = null, camera = null;
   let cubeGeom = null, matPink = null, matCyan = null, matGold = null;
 
