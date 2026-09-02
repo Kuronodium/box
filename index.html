@@ -5,7 +5,6 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <title>30 ASSAULT</title>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@500;700;800&family=Zen+Kaku+Gothic+New:wght@500;700;900&display=swap">
-<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"></script>
 <style>
   html, body {
     margin: 0;
@@ -23,21 +22,13 @@
     align-items: center;
     height: 100%;
   }
-  #stage {
-    position: relative;
+  #game {
     background: linear-gradient(180deg, #1a0533 0%, #0d0221 100%);
-    box-shadow: 0 0 40px rgba(255, 110, 199, 0.35);
-    border-radius: 6px;
-    overflow: hidden;
-  }
-  #stage canvas {
-    position: absolute;
-    inset: 0;
     display: block;
     touch-action: none;
+    box-shadow: 0 0 40px rgba(255, 110, 199, 0.35);
+    border-radius: 6px;
   }
-  #three { pointer-events: none; }
-  #game { background: transparent; }
   #hud {
     position: fixed;
     top: 0; left: 0; right: 0;
@@ -92,12 +83,7 @@
 </style>
 </head>
 <body>
-<div id="wrap">
-  <div id="stage">
-    <canvas id="three"></canvas>
-    <canvas id="game"></canvas>
-  </div>
-</div>
+<div id="wrap"><canvas id="game"></canvas></div>
 <div id="hud">
   <span class="score" id="scoreText">SCORE: 0</span>
   <span class="combo" id="comboText">COMBO: x1</span>
@@ -114,13 +100,23 @@
   const LOGICAL_W = 360, LOGICAL_H = 640;
   const canvas = document.getElementById('game');
   const ctx = canvas.getContext('2d');
-  const threeCanvas = document.getElementById('three');
-  const stage = document.getElementById('stage');
   const overlay = document.getElementById('overlay');
   const overlayMsg = document.getElementById('overlayMsg');
   const startBtn = document.getElementById('startBtn');
   const scoreText = document.getElementById('scoreText');
   const comboText = document.getElementById('comboText');
+
+  function resize() {
+    const maxW = Math.min(window.innerWidth, 480);
+    const maxH = window.innerHeight;
+    const scale = Math.min(maxW / LOGICAL_W, maxH / LOGICAL_H);
+    canvas.style.width = (LOGICAL_W * scale) + 'px';
+    canvas.style.height = (LOGICAL_H * scale) + 'px';
+    canvas.width = LOGICAL_W;
+    canvas.height = LOGICAL_H;
+  }
+  window.addEventListener('resize', resize);
+  resize();
 
   const GLYPH_FONT = "'JetBrains Mono', monospace";
   const COLOR_3 = '#ff6ec7';
@@ -146,6 +142,88 @@
     [0,1,1,1,0],
   ];
   const CELL = 26;
+
+  // ================= Isometric voxel cubes (pure Canvas 2D, no external libs) =================
+  function shade(hex, amt) {
+    const num = parseInt(hex.slice(1), 16);
+    let r = (num >> 16) & 0xff, g = (num >> 8) & 0xff, b = num & 0xff;
+    if (amt >= 0) {
+      r += (255 - r) * amt; g += (255 - g) * amt; b += (255 - b) * amt;
+    } else {
+      r *= (1 + amt); g *= (1 + amt); b *= (1 + amt);
+    }
+    return `rgb(${r | 0},${g | 0},${b | 0})`;
+  }
+
+  // Draws one iso cube. (cx, cy) is the horizontal/vertical center of the whole cube.
+  function drawIsoCube(cx, cy, s, hex, bob) {
+    const w = s, h = s * 0.55, bodyH = s * 0.8;
+    const topY = cy - (h + bodyH) / 2 + (bob || 0);
+    ctx.fillStyle = shade(hex, 0.32);
+    ctx.beginPath();
+    ctx.moveTo(cx, topY - h / 2);
+    ctx.lineTo(cx + w / 2, topY);
+    ctx.lineTo(cx, topY + h / 2);
+    ctx.lineTo(cx - w / 2, topY);
+    ctx.closePath();
+    ctx.fill();
+
+    ctx.fillStyle = shade(hex, -0.12);
+    ctx.beginPath();
+    ctx.moveTo(cx - w / 2, topY);
+    ctx.lineTo(cx, topY + h / 2);
+    ctx.lineTo(cx, topY + h / 2 + bodyH);
+    ctx.lineTo(cx - w / 2, topY + bodyH);
+    ctx.closePath();
+    ctx.fill();
+
+    ctx.fillStyle = shade(hex, -0.34);
+    ctx.beginPath();
+    ctx.moveTo(cx + w / 2, topY);
+    ctx.lineTo(cx, topY + h / 2);
+    ctx.lineTo(cx, topY + h / 2 + bodyH);
+    ctx.lineTo(cx + w / 2, topY + bodyH);
+    ctx.closePath();
+    ctx.fill();
+  }
+
+  // Draws a cluster of cubes (list of {gx, gy, s} grid offsets in cube-size units) around (cx, cy).
+  function drawVoxelCluster(cx, cy, cellSize, offsets, hex, t) {
+    // back-to-front so nearer cubes overlap farther ones correctly
+    const sorted = offsets.slice().sort((a, b) => (a.gy - a.gx * 0.001) - (b.gy - b.gx * 0.001));
+    sorted.forEach((o, i) => {
+      const bob = Math.sin(t * 2.4 + i * 0.9) * cellSize * 0.05;
+      drawIsoCube(cx + o.gx * cellSize, cy + o.gy * cellSize * 0.72, cellSize, hex, bob);
+    });
+  }
+
+  const PLAYER_OFFSETS = [
+    { gx: 0, gy: -1 }, { gx: -0.9, gy: 0 }, { gx: 0, gy: 0 }, { gx: 0.9, gy: 0 },
+  ];
+  const CHUNK_OFFSETS = [
+    { gx: -0.6, gy: -0.6 }, { gx: 0.6, gy: -0.6 },
+    { gx: -0.6, gy: 0.6 }, { gx: 0.6, gy: 0.6 },
+  ];
+
+  function buildBossCells() {
+    const cells = [];
+    const totalW = (5 + 1 + 5) * CELL;
+    const originX = LOGICAL_W / 2 - totalW / 2;
+    const originY = 30;
+    DIGIT_3.forEach((row, r) => {
+      row.forEach((v, c) => {
+        if (!v) return;
+        cells.push({ x: originX + c * CELL, y: originY + r * CELL, type: '3', color: COLOR_3, alive: true });
+      });
+    });
+    DIGIT_0.forEach((row, r) => {
+      row.forEach((v, c) => {
+        if (!v) return;
+        cells.push({ x: originX + (6 + c) * CELL, y: originY + r * CELL, type: '0', color: COLOR_0, alive: true });
+      });
+    });
+    return cells;
+  }
 
   // ---- Life icon: a heart drawn from '0' glyph cells ----
   const HEART_PATTERN = [
@@ -184,190 +262,13 @@
     }
   }
 
-  function buildBossCells() {
-    const cells = [];
-    const totalW = (5 + 1 + 5) * CELL;
-    const originX = LOGICAL_W / 2 - totalW / 2;
-    const originY = 30;
-    DIGIT_3.forEach((row, r) => {
-      row.forEach((v, c) => {
-        if (!v) return;
-        cells.push({ x: originX + c * CELL, y: originY + r * CELL, type: '3', color: COLOR_3, alive: true });
-      });
-    });
-    DIGIT_0.forEach((row, r) => {
-      row.forEach((v, c) => {
-        if (!v) return;
-        cells.push({ x: originX + (6 + c) * CELL, y: originY + r * CELL, type: '0', color: COLOR_0, alive: true });
-      });
-    });
-    return cells;
-  }
-
-  // ================= Three.js voxel layer (characters only) =================
-  // Falls back to flat 2D glyphs if the three.js CDN failed to load.
-  const HAS_3D = typeof THREE !== 'undefined';
-  if (!HAS_3D) {
-    const badge = document.createElement('div');
-    badge.textContent = '2D FALLBACK (3D lib failed to load)';
-    badge.style.cssText = 'position:fixed;bottom:4px;right:6px;font:10px monospace;color:rgba(255,255,255,0.35);pointer-events:none;z-index:9;';
-    document.body.appendChild(badge);
-  }
-  let renderer = null, scene = null, camera = null;
-  let cubeGeom = null, matPink = null, matCyan = null, matGold = null;
-
-  if (HAS_3D) {
-    renderer = new THREE.WebGLRenderer({ canvas: threeCanvas, alpha: true, antialias: true });
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
-    scene = new THREE.Scene();
-    camera = new THREE.OrthographicCamera(-LOGICAL_W / 2, LOGICAL_W / 2, LOGICAL_H / 2, -LOGICAL_H / 2, 0.1, 2000);
-    camera.position.set(0, 0, 500);
-    camera.lookAt(0, 0, 0);
-
-    scene.add(new THREE.AmbientLight(0xffffff, 0.55));
-    const dirLight = new THREE.DirectionalLight(0xffffff, 0.85);
-    dirLight.position.set(120, 180, 260);
-    scene.add(dirLight);
-    const rimLight = new THREE.DirectionalLight(0xff6ec7, 0.35);
-    rimLight.position.set(-150, -80, 120);
-    scene.add(rimLight);
-
-    cubeGeom = new THREE.BoxGeometry(1, 1, 1);
-    matPink = new THREE.MeshStandardMaterial({ color: 0xff6ec7, roughness: 0.45, metalness: 0.1 });
-    matCyan = new THREE.MeshStandardMaterial({ color: 0x6ee7ff, roughness: 0.45, metalness: 0.1 });
-    matGold = new THREE.MeshStandardMaterial({ color: 0xffd166, roughness: 0.35, metalness: 0.15 });
-  }
-
-  function toWorld(x, y) {
-    return { x: x - LOGICAL_W / 2, y: LOGICAL_H / 2 - y };
-  }
-
-  function makeCube(mat, sx, sy, sz) {
-    const cube = new THREE.Mesh(cubeGeom, mat);
-    cube.scale.set(sx, sy, sz != null ? sz : sx);
-    return cube;
-  }
-
-  // Player voxel ship: a small chunky arrow built from cubes
-  function buildPlayerVoxels() {
-    const group = new THREE.Group();
-    const s = 6.2;
-    const offsets = [
-      [0, 1.1, 0], [-1, 0, 0], [0, 0, 0], [1, 0, 0], [-1.6, -0.9, 0], [1.6, -0.9, 0],
-    ];
-    offsets.forEach(([gx, gy]) => {
-      const cube = makeCube(matGold, s * 0.86, s * 0.86, s * 1.1);
-      cube.position.set(gx * s, gy * s, 0);
-      group.add(cube);
-    });
-    return group;
-  }
-  const playerVoxels = HAS_3D ? buildPlayerVoxels() : null;
-  if (HAS_3D) scene.add(playerVoxels);
-
-  // Regular enemy voxel: a compact "30" chunk built from a small cube cluster
-  function buildChunkVoxels(color) {
-    const group = new THREE.Group();
-    const mat = color === COLOR_3 ? matPink : matCyan;
-    const s = 6.2;
-    const offsets = [
-      [-1, 1, 0], [0, 1, 0], [1, 1, 0],
-      [-1, 0, 0], [0, 0, 0], [1, 0, 0],
-      [-1, -1, 0], [0, -1, 0], [1, -1, 0],
-      [0, 0, -1], [0, 0, 1],
-    ];
-    offsets.forEach(([gx, gy, gz]) => {
-      const cube = makeCube(mat, s * 0.86);
-      cube.position.set(gx * s, gy * s, gz * s);
-      group.add(cube);
-    });
-    return group;
-  }
-
-  const enemyVoxels = new Map(); // enemy object -> THREE.Group
-  function syncEnemyVoxels() {
-    if (!HAS_3D) return;
-    const alive = new Set(enemies);
-    for (const [e, group] of enemyVoxels) {
-      if (!alive.has(e)) { scene.remove(group); enemyVoxels.delete(e); }
-    }
-    enemies.forEach(e => {
-      let group = enemyVoxels.get(e);
-      if (!group) {
-        group = buildChunkVoxels(e.color);
-        scene.add(group);
-        enemyVoxels.set(e, group);
-      }
-      const w = toWorld(e.x, e.y);
-      group.position.set(w.x, w.y, 0);
-      group.rotation.y = Math.sin(e.wob) * 0.6;
-      group.rotation.x = Math.cos(e.wob * 0.7) * 0.2;
-    });
-  }
-  function clearEnemyVoxels() {
-    if (!HAS_3D) return;
-    for (const group of enemyVoxels.values()) scene.remove(group);
-    enemyVoxels.clear();
-  }
-
-  // Boss voxel sculpture: one solid cube per outline cell, built at "30" macro scale
-  let bossVoxels = null;
-  function spawnBossVoxels() {
-    if (!HAS_3D) return;
-    const group = new THREE.Group();
-    boss.cells.forEach(c => {
-      const mat = c.type === '3' ? matPink : matCyan;
-      const base = toWorld(c.x + CELL / 2, c.y + CELL / 2);
-      const cube = makeCube(mat, CELL * 0.82, CELL * 0.82, CELL * 0.7);
-      cube.position.set(base.x, base.y, 0);
-      group.add(cube);
-      c.mesh = cube;
-    });
-    scene.add(group);
-    bossVoxels = group;
-  }
-  function clearBossVoxels() {
-    if (!HAS_3D) return;
-    if (bossVoxels) { scene.remove(bossVoxels); bossVoxels = null; }
-  }
-
-  function syncVoxels(dt) {
-    if (!HAS_3D) return;
-    const flashing = invincibleT > 0 && Math.floor(invincibleT * 12) % 2 === 0;
-    const pw = toWorld(player.x, player.y);
-    playerVoxels.position.set(pw.x, pw.y, 0);
-    playerVoxels.visible = !flashing;
-    playerVoxels.rotation.y += dt * 1.4;
-
-    syncEnemyVoxels();
-
-    if (boss && bossVoxels) {
-      bossVoxels.position.set(boss._dx || 0, -(boss._dy || 0), 0);
-      bossVoxels.rotation.y = Math.sin(bossOffsetT * 0.5) * 0.32;
-    }
-  }
-  // ================= end Three.js voxel layer =================
-
-  function resize() {
-    const maxW = Math.min(window.innerWidth, 480);
-    const maxH = window.innerHeight;
-    const scale = Math.min(maxW / LOGICAL_W, maxH / LOGICAL_H);
-    stage.style.width = (LOGICAL_W * scale) + 'px';
-    stage.style.height = (LOGICAL_H * scale) + 'px';
-    canvas.width = LOGICAL_W;
-    canvas.height = LOGICAL_H;
-    if (HAS_3D) renderer.setSize(LOGICAL_W, LOGICAL_H, false);
-  }
-  window.addEventListener('resize', resize);
-  resize();
-
   // ---- Player ----
   const player = { x: LOGICAL_W / 2, y: LOGICAL_H - 70, r: 12 };
 
   // ---- State ----
   let state = 'ready'; // ready | playing | clear | over
   let score = 0, life = 3, combo = 0, lastKillType = null;
-  let bullets = [];       // player bullets (glyph '0')
+  let bullets = [];       // player bullets
   let bossBullets = [];   // boss bullets
   let enemies = [];
   let boss = null;
@@ -382,6 +283,7 @@
   let beamTimer = 0;
   let playerBulletToggle = false;
   let bossBulletToggle = false;
+  let animT = 0;
 
   function resetGame() {
     score = 0; life = 3; combo = 0; lastKillType = null;
@@ -391,8 +293,6 @@
     beam = null; beamTimer = 2.5;
     particles = []; playerBulletToggle = false; bossBulletToggle = false;
     player.x = LOGICAL_W / 2; player.y = LOGICAL_H - 70;
-    clearEnemyVoxels();
-    clearBossVoxels();
     state = 'playing';
     updateHud();
   }
@@ -460,6 +360,7 @@
 
   function update(dt) {
     if (state !== 'playing') return;
+    animT += dt;
     if (invincibleT > 0) invincibleT -= dt;
 
     // player auto-fire (alternates 3 / 0)
@@ -532,7 +433,6 @@
         boss = { cells, total: cells.length };
         bossFireTimer = 1;
         beamTimer = 2.2;
-        spawnBossVoxels();
       }
     } else {
       // boss movement
@@ -585,7 +485,6 @@
           if (Math.abs(b.x - cx) < CELL / 2 && Math.abs(b.y - cy) < CELL / 2) {
             b.hit = true;
             c.alive = false;
-            if (c.mesh) c.mesh.visible = false;
             spawnExplosion(cx, cy, c.color);
             registerKill(c.type, 20);
           }
@@ -617,7 +516,7 @@
     updateHud();
   }
 
-  // ---- Render (2D overlay: bullets, particles, HUD chrome — characters are 3D) ----
+  // ---- Render ----
   function drawGlyph(ch, x, y, size, color) {
     ctx.font = `bold ${size}px ${GLYPH_FONT}`;
     ctx.fillStyle = color;
@@ -629,33 +528,18 @@
   function draw() {
     ctx.clearRect(0, 0, LOGICAL_W, LOGICAL_H);
 
-    // fallback flat rendering when the three.js voxel layer couldn't load
-    if (!HAS_3D) {
-      const flashing = invincibleT > 0 && Math.floor(invincibleT * 12) % 2 === 0;
-      if (!flashing) {
-        ctx.beginPath();
-        ctx.moveTo(player.x, player.y - player.r);
-        ctx.lineTo(player.x - player.r, player.y + player.r);
-        ctx.lineTo(player.x + player.r, player.y + player.r);
-        ctx.closePath();
-        ctx.fillStyle = '#ffd166';
-        ctx.fill();
-      }
-      if (!boss) {
-        enemies.forEach(e => drawGlyph('30', e.x, e.y, 18, e.color));
-      } else {
-        const dx = boss._dx || 0, dy = boss._dy || 0;
-        boss.cells.forEach(c => {
-          if (!c.alive) return;
-          drawGlyph('30', c.x + dx + CELL / 2, c.y + dy + CELL / 2, 11, c.color);
-        });
-      }
+    // player: small voxel arrow ship
+    const flashing = invincibleT > 0 && Math.floor(invincibleT * 12) % 2 === 0;
+    if (!flashing) {
+      drawVoxelCluster(player.x, player.y, 11, PLAYER_OFFSETS, '#ffd166', animT);
     }
 
     // player bullets
     bullets.forEach(b => drawGlyph(b.ch, b.x, b.y, 14, '#ffffff'));
 
-    if (boss) {
+    if (!boss) {
+      enemies.forEach(e => drawVoxelCluster(e.x, e.y, 11, CHUNK_OFFSETS, e.color, animT + e.wob));
+    } else {
       const dx = boss._dx || 0, dy = boss._dy || 0;
 
       // beam telegraph / active column
@@ -673,6 +557,12 @@
         }
       }
 
+      // the boss: one solid iso cube per outline cell — a "30" built out of cubes
+      boss.cells.forEach(c => {
+        if (!c.alive) return;
+        const bob = Math.sin(animT * 1.6 + c.x * 0.05 + c.y * 0.05) * 1.4;
+        drawIsoCube(c.x + dx + CELL / 2, c.y + dy + CELL / 2, CELL * 0.92, c.color, bob);
+      });
       bossBullets.forEach(b => drawGlyph(b.ch, b.x, b.y, 12, '#ff5a5a'));
 
       // boss HP bar
@@ -707,14 +597,11 @@
     const dt = Math.min((t - lastTime) / 1000, 0.033);
     lastTime = t;
     update(dt);
-    syncVoxels(dt);
     draw();
-    if (HAS_3D) renderer.render(scene, camera);
     requestAnimationFrame(loop);
   }
 
   draw();
-  if (HAS_3D) renderer.render(scene, camera);
   requestAnimationFrame(loop);
 })();
 </script>
