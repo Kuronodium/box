@@ -44,7 +44,6 @@
   }
   #hud .score { color: #ffd166; }
   #hud .combo { color: #6ee7ff; }
-  #hud .life { color: #ff6ec7; }
   #overlay {
     position: fixed;
     inset: 0;
@@ -88,11 +87,10 @@
 <div id="hud">
   <span class="score" id="scoreText">SCORE: 0</span>
   <span class="combo" id="comboText">COMBO: x1</span>
-  <span class="life" id="lifeText">LIFE: 3</span>
 </div>
 <div id="overlay">
   <h1>30 ASSAULT</h1>
-  <p id="overlayMsg">敵はぜんぶ「3」と「0」。<br>同じ色を連続で撃つとコンボ倍率アップ。<br>「30」の姿をしたボスを倒せばクリア。<br>ライフが0になるとゲームオーバー。</p>
+  <p id="overlayMsg">敵はぜんぶ「3」と「0」。<br>同じ色を連続で撃つとコンボ倍率アップ。<br>「30」の姿をしたボスはHPゲージ制、ビームも撃ってくる。<br>倒せばクリア、ハートが0になるとゲームオーバー。</p>
   <button id="startBtn">TAP TO START</button>
   <p class="sub">画面をドラッグで自機移動(自動連射)</p>
 </div>
@@ -107,7 +105,6 @@
   const startBtn = document.getElementById('startBtn');
   const scoreText = document.getElementById('scoreText');
   const comboText = document.getElementById('comboText');
-  const lifeText = document.getElementById('lifeText');
 
   function resize() {
     const maxW = Math.min(window.innerWidth, 480);
@@ -146,6 +143,25 @@
   ];
   const CELL = 20;
 
+  // ---- Life icon: a heart drawn from '0' glyph cells ----
+  const HEART_PATTERN = [
+    [0,1,0,1,0],
+    [1,1,1,1,1],
+    [1,1,1,1,1],
+    [0,1,1,1,0],
+    [0,0,1,0,0],
+  ];
+  function drawHeart(ox, oy, active) {
+    const cell = 4;
+    const color = active ? '#ff6ec7' : 'rgba(255,255,255,0.18)';
+    HEART_PATTERN.forEach((row, r) => {
+      row.forEach((v, c) => {
+        if (!v) return;
+        drawGlyph('0', ox + c * cell, oy + r * cell, cell * 1.7, color);
+      });
+    });
+  }
+
   function buildBossCells() {
     const cells = [];
     const totalW = (5 + 1 + 5) * CELL;
@@ -183,12 +199,15 @@
   let fireTimer = 0;
   let bossFireTimer = 0;
   let invincibleT = 0;
+  let beam = null;          // { x, phase: 'warn'|'active', t }
+  let beamTimer = 0;
 
   function resetGame() {
     score = 0; life = 3; combo = 0; lastKillType = null;
     bullets = []; bossBullets = []; enemies = [];
     boss = null; bossOffsetT = 0; killCount = 0;
     spawnTimer = 0; fireTimer = 0; bossFireTimer = 0; invincibleT = 1;
+    beam = null; beamTimer = 2.5;
     player.x = LOGICAL_W / 2; player.y = LOGICAL_H - 70;
     state = 'playing';
     updateHud();
@@ -197,7 +216,6 @@
   function updateHud() {
     scoreText.textContent = 'SCORE: ' + score;
     comboText.textContent = 'COMBO: x' + Math.max(1, combo);
-    lifeText.textContent = 'LIFE: ' + Math.max(0, life);
   }
 
   // ---- Input ----
@@ -316,8 +334,10 @@
       enemies = enemies.filter(e => !e.dead);
 
       if (killCount >= WAVE_TARGET) {
-        boss = { cells: buildBossCells(), alive: buildBossCells().length };
-        boss.total = boss.alive;
+        const cells = buildBossCells();
+        boss = { cells, total: cells.length };
+        bossFireTimer = 1;
+        beamTimer = 2.2;
       }
     } else {
       // boss movement
@@ -325,18 +345,40 @@
       const dx = Math.sin(bossOffsetT * 0.6) * 40;
       const dy = Math.min(bossOffsetT * 30, 60);
 
-      // boss fire
+      // boss fire (aimed shots)
       bossFireTimer -= dt;
       if (bossFireTimer <= 0) {
-        bossFireTimer = 0.9;
+        bossFireTimer = 0.7;
         const alive = boss.cells.filter(c => c.alive);
         if (alive.length) {
           const c = alive[Math.floor(Math.random() * alive.length)];
-          bossBullets.push({ x: c.x + dx + CELL / 2, y: c.y + dy + CELL / 2, vy: 160 });
+          bossBullets.push({ x: c.x + dx + CELL / 2, y: c.y + dy + CELL / 2, vy: 180 });
         }
       }
       bossBullets.forEach(b => b.y += b.vy * dt);
       bossBullets = bossBullets.filter(b => b.y < LOGICAL_H + 20);
+
+      // beam attack: telegraph then a wide damaging column
+      if (!beam) {
+        beamTimer -= dt;
+        if (beamTimer <= 0) {
+          beam = { x: 30 + Math.random() * (LOGICAL_W - 60), phase: 'warn', t: 0.7, width: 34 };
+        }
+      } else {
+        beam.t -= dt;
+        if (beam.phase === 'warn' && beam.t <= 0) {
+          beam.phase = 'active';
+          beam.t = 0.35;
+        } else if (beam.phase === 'active') {
+          if (Math.abs(player.x - beam.x) < beam.width / 2 + player.r) {
+            hitPlayer();
+          }
+          if (beam.t <= 0) {
+            beam = null;
+            beamTimer = 2.8 + Math.random() * 1.2;
+          }
+        }
+      }
 
       // bullet vs boss cells
       for (const c of boss.cells) {
@@ -402,17 +444,50 @@
     }
 
     // player bullets
-    bullets.forEach(b => drawGlyph('0', b.x, b.y, 14, '#ffffff'));
+    bullets.forEach(b => drawGlyph('3', b.x, b.y, 14, '#ffffff'));
 
     if (!boss) {
       enemies.forEach(e => drawGlyph(e.type, e.x, e.y, 22, e.color));
     } else {
       const dx = boss._dx || 0, dy = boss._dy || 0;
+
+      // beam telegraph / active column
+      if (beam) {
+        if (beam.phase === 'warn') {
+          ctx.fillStyle = 'rgba(255, 90, 90, 0.28)';
+          ctx.fillRect(beam.x - 2, 90, 4, LOGICAL_H - 90);
+        } else {
+          const grad = ctx.createLinearGradient(beam.x - beam.width / 2, 0, beam.x + beam.width / 2, 0);
+          grad.addColorStop(0, 'rgba(255,90,90,0)');
+          grad.addColorStop(0.5, 'rgba(255,90,90,0.85)');
+          grad.addColorStop(1, 'rgba(255,90,90,0)');
+          ctx.fillStyle = grad;
+          ctx.fillRect(beam.x - beam.width / 2, 90, beam.width, LOGICAL_H - 90);
+        }
+      }
+
       boss.cells.forEach(c => {
         if (!c.alive) return;
         drawGlyph(c.type, c.x + dx + CELL / 2, c.y + dy + CELL / 2, 16, c.color);
       });
-      bossBullets.forEach(b => drawGlyph('0', b.x, b.y, 12, '#ff5a5a'));
+      bossBullets.forEach(b => drawGlyph('3', b.x, b.y, 12, '#ff5a5a'));
+
+      // boss HP bar
+      const remaining = boss.cells.filter(c => c.alive).length;
+      const pct = remaining / boss.total;
+      ctx.fillStyle = 'rgba(255,255,255,0.12)';
+      ctx.fillRect(30, 12, LOGICAL_W - 60, 8);
+      ctx.fillStyle = pct > 0.3 ? '#ff6ec7' : '#ff5a5a';
+      ctx.fillRect(30, 12, (LOGICAL_W - 60) * pct, 8);
+      ctx.font = `10px ${GLYPH_FONT}`;
+      ctx.fillStyle = '#a89bd6';
+      ctx.textAlign = 'center';
+      ctx.fillText('BOSS', LOGICAL_W / 2, 8);
+    }
+
+    // life hearts (bottom-left, out of the way of boss HP bar / play field)
+    for (let i = 0; i < 3; i++) {
+      drawHeart(10 + i * 24, LOGICAL_H - 24, i < life);
     }
   }
 
