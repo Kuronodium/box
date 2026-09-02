@@ -122,7 +122,7 @@
   const COLOR_3 = '#ff6ec7';
   const COLOR_0 = '#6ee7ff';
 
-  // ---- Boss shape: digits "3" and "0" laid out as a grid of cells ----
+  // ---- Boss shape: digits "3" and "0" built out of glyph cells ----
   const DIGIT_3 = [
     [1,1,1,1,0],
     [0,0,0,0,1],
@@ -142,97 +142,6 @@
     [0,1,1,1,0],
   ];
   const CELL = 26;
-
-  // ================= Isometric voxel cubes (pure Canvas 2D, no external libs) =================
-  function shade(hex, amt) {
-    const num = parseInt(hex.slice(1), 16);
-    let r = (num >> 16) & 0xff, g = (num >> 8) & 0xff, b = num & 0xff;
-    if (amt >= 0) {
-      r += (255 - r) * amt; g += (255 - g) * amt; b += (255 - b) * amt;
-    } else {
-      r *= (1 + amt); g *= (1 + amt); b *= (1 + amt);
-    }
-    return `rgb(${r | 0},${g | 0},${b | 0})`;
-  }
-
-  // Draws one iso cube. (cx, cy) is the horizontal/vertical center of the whole cube.
-  function drawIsoCube(cx, cy, s, hex, bob) {
-    const w = s, h = s * 0.55, bodyH = s * 0.8;
-    const topY = cy - (h + bodyH) / 2 + (bob || 0);
-    ctx.fillStyle = shade(hex, 0.32);
-    ctx.beginPath();
-    ctx.moveTo(cx, topY - h / 2);
-    ctx.lineTo(cx + w / 2, topY);
-    ctx.lineTo(cx, topY + h / 2);
-    ctx.lineTo(cx - w / 2, topY);
-    ctx.closePath();
-    ctx.fill();
-
-    ctx.fillStyle = shade(hex, -0.12);
-    ctx.beginPath();
-    ctx.moveTo(cx - w / 2, topY);
-    ctx.lineTo(cx, topY + h / 2);
-    ctx.lineTo(cx, topY + h / 2 + bodyH);
-    ctx.lineTo(cx - w / 2, topY + bodyH);
-    ctx.closePath();
-    ctx.fill();
-
-    ctx.fillStyle = shade(hex, -0.34);
-    ctx.beginPath();
-    ctx.moveTo(cx + w / 2, topY);
-    ctx.lineTo(cx, topY + h / 2);
-    ctx.lineTo(cx, topY + h / 2 + bodyH);
-    ctx.lineTo(cx + w / 2, topY + bodyH);
-    ctx.closePath();
-    ctx.fill();
-  }
-
-  // Draws a solid extruded block: `depth` cubes stacked back-to-front along a
-  // fixed iso offset, so the shape reads as one thick slab instead of loose cubes.
-  function drawIsoBlock(cx, cy, s, hex, bob, depth) {
-    const ddx = s * 0.34, ddy = s * 0.2;
-    for (let i = depth - 1; i >= 0; i--) {
-      drawIsoCube(cx + ddx * i, cy + ddy * i, s, hex, bob);
-    }
-  }
-
-  // Draws a cluster of cubes (list of {gx, gy, s} grid offsets in cube-size units) around (cx, cy).
-  function drawVoxelCluster(cx, cy, cellSize, offsets, hex, t, depth) {
-    // back-to-front so nearer cubes overlap farther ones correctly
-    const sorted = offsets.slice().sort((a, b) => (a.gy - a.gx * 0.001) - (b.gy - b.gx * 0.001));
-    sorted.forEach((o, i) => {
-      const bob = Math.sin(t * 2.4 + i * 0.9) * cellSize * 0.05;
-      drawIsoBlock(cx + o.gx * cellSize, cy + o.gy * cellSize * 0.72, cellSize, hex, bob, depth || 1);
-    });
-  }
-
-  const PLAYER_OFFSETS = [
-    { gx: 0, gy: -1 }, { gx: -0.9, gy: 0 }, { gx: 0, gy: 0 }, { gx: 0.9, gy: 0 },
-  ];
-  const CHUNK_OFFSETS = [
-    { gx: -0.6, gy: -0.6 }, { gx: 0.6, gy: -0.6 },
-    { gx: -0.6, gy: 0.6 }, { gx: 0.6, gy: 0.6 },
-  ];
-
-  function buildBossCells() {
-    const cells = [];
-    const totalW = (5 + 1 + 5) * CELL;
-    const originX = LOGICAL_W / 2 - totalW / 2;
-    const originY = 30;
-    DIGIT_3.forEach((row, r) => {
-      row.forEach((v, c) => {
-        if (!v) return;
-        cells.push({ x: originX + c * CELL, y: originY + r * CELL, type: '3', color: COLOR_3, alive: true });
-      });
-    });
-    DIGIT_0.forEach((row, r) => {
-      row.forEach((v, c) => {
-        if (!v) return;
-        cells.push({ x: originX + (6 + c) * CELL, y: originY + r * CELL, type: '0', color: COLOR_0, alive: true });
-      });
-    });
-    return cells;
-  }
 
   // ---- Life icon: a heart drawn from '0' glyph cells ----
   const HEART_PATTERN = [
@@ -271,13 +180,33 @@
     }
   }
 
+  function buildBossCells() {
+    const cells = [];
+    const totalW = (5 + 1 + 5) * CELL;
+    const originX = LOGICAL_W / 2 - totalW / 2;
+    const originY = 30;
+    DIGIT_3.forEach((row, r) => {
+      row.forEach((v, c) => {
+        if (!v) return;
+        cells.push({ x: originX + c * CELL, y: originY + r * CELL, type: '3', color: COLOR_3, alive: true });
+      });
+    });
+    DIGIT_0.forEach((row, r) => {
+      row.forEach((v, c) => {
+        if (!v) return;
+        cells.push({ x: originX + (6 + c) * CELL, y: originY + r * CELL, type: '0', color: COLOR_0, alive: true });
+      });
+    });
+    return cells;
+  }
+
   // ---- Player ----
   const player = { x: LOGICAL_W / 2, y: LOGICAL_H - 70, r: 12 };
 
   // ---- State ----
   let state = 'ready'; // ready | playing | clear | over
   let score = 0, life = 3, combo = 0, lastKillType = null;
-  let bullets = [];       // player bullets
+  let bullets = [];       // player bullets (glyph '0')
   let bossBullets = [];   // boss bullets
   let enemies = [];
   let boss = null;
@@ -292,7 +221,6 @@
   let beamTimer = 0;
   let playerBulletToggle = false;
   let bossBulletToggle = false;
-  let animT = 0;
 
   function resetGame() {
     score = 0; life = 3; combo = 0; lastKillType = null;
@@ -369,7 +297,6 @@
 
   function update(dt) {
     if (state !== 'playing') return;
-    animT += dt;
     if (invincibleT > 0) invincibleT -= dt;
 
     // player auto-fire (alternates 3 / 0)
@@ -537,17 +464,23 @@
   function draw() {
     ctx.clearRect(0, 0, LOGICAL_W, LOGICAL_H);
 
-    // player: small voxel arrow ship
+    // player
     const flashing = invincibleT > 0 && Math.floor(invincibleT * 12) % 2 === 0;
     if (!flashing) {
-      drawVoxelCluster(player.x, player.y, 11, PLAYER_OFFSETS, '#ffd166', animT, 2);
+      ctx.beginPath();
+      ctx.moveTo(player.x, player.y - player.r);
+      ctx.lineTo(player.x - player.r, player.y + player.r);
+      ctx.lineTo(player.x + player.r, player.y + player.r);
+      ctx.closePath();
+      ctx.fillStyle = '#ffd166';
+      ctx.fill();
     }
 
     // player bullets
     bullets.forEach(b => drawGlyph(b.ch, b.x, b.y, 14, '#ffffff'));
 
     if (!boss) {
-      enemies.forEach(e => drawVoxelCluster(e.x, e.y, 11, CHUNK_OFFSETS, e.color, animT + e.wob, 2));
+      enemies.forEach(e => drawGlyph('30', e.x, e.y, 18, e.color));
     } else {
       const dx = boss._dx || 0, dy = boss._dy || 0;
 
@@ -566,12 +499,9 @@
         }
       }
 
-      // the boss: an extruded "30" — each outline cell is a stack of cubes with
-      // real depth, so the whole numeral reads as one thick solid slab
       boss.cells.forEach(c => {
         if (!c.alive) return;
-        const bob = Math.sin(animT * 1.6 + c.x * 0.05 + c.y * 0.05) * 1.4;
-        drawIsoBlock(c.x + dx + CELL / 2, c.y + dy + CELL / 2, CELL * 0.9, c.color, bob, 3);
+        drawGlyph('30', c.x + dx + CELL / 2, c.y + dy + CELL / 2, 11, c.color);
       });
       bossBullets.forEach(b => drawGlyph(b.ch, b.x, b.y, 12, '#ff5a5a'));
 
