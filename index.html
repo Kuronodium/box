@@ -523,11 +523,20 @@
     ctx.restore();
   }
 
-  // Player ship: a "0" fuselage with "3" wings laid on their side, swept back.
+  // Player ship: a nose-cone triangle of four "0"s with two-glyph "3" wings
+  // per side, each "3" flipped so its open side faces down.
   function drawPlayerShip(x, y) {
-    drawGlyphRotated('3', x - 13, y + 2, 16, '#ffd166', Math.PI / 2, false);
-    drawGlyphRotated('3', x + 13, y + 2, 16, '#ffd166', Math.PI / 2, true);
-    drawGlyph('0', x, y, 18, '#ffd166');
+    const wingAngle = -Math.PI / 2;
+    // left wing (2 cubes), then its mirror on the right
+    drawGlyphRotated('3', x - 19, y + 1, 15, '#ffd166', wingAngle, false);
+    drawGlyphRotated('3', x - 25, y + 8, 15, '#ffd166', wingAngle, false);
+    drawGlyphRotated('3', x + 19, y + 1, 15, '#ffd166', wingAngle, true);
+    drawGlyphRotated('3', x + 25, y + 8, 15, '#ffd166', wingAngle, true);
+    // center fuselage: a triangle built from four "0"s
+    drawGlyph('0', x, y - 11, 13, '#ffd166');
+    drawGlyph('0', x - 9, y + 6, 13, '#ffd166');
+    drawGlyph('0', x, y + 8, 13, '#ffd166');
+    drawGlyph('0', x + 9, y + 6, 13, '#ffd166');
   }
 
   function draw() {
@@ -565,7 +574,7 @@
       }
 
       boss.cells.forEach(c => {
-        drawGlyph('30', c.x + dx + CELL / 2, c.y + dy + CELL / 2, 11, c.color);
+        drawGlyph('30', c.x + dx + CELL / 2, c.y + dy + CELL / 2, 22, c.color);
       });
       bossBullets.forEach(b => drawGlyph(b.ch, b.x, b.y, 12, '#ff5a5a'));
 
