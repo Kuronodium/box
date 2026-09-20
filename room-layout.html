@@ -73,6 +73,7 @@
 
   #stage{position:relative; min-width:0; min-height:0; background:var(--scene-bg); overflow:hidden}
   #stage canvas{display:block; width:100%; height:100%; touch-action:none}
+  #stage canvas[hidden]{display:none !important}
   #plan{position:absolute; inset:0}
 
   .hud{position:absolute; left:12px; bottom:12px; display:flex; gap:8px; flex-wrap:wrap; max-width:calc(100% - 24px); pointer-events:none}
@@ -177,7 +178,6 @@
   @media (prefers-reduced-motion: reduce){*{transition:none !important; animation:none !important}}
 </style>
 
-<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 
 <div id="app">
   <header class="bar">
@@ -455,246 +455,368 @@
 
   function touch(){ state.isSample = false; }
 
-  /* ---------- 3Dビュー ---------- */
+  /* ---------- 3Dビュー（Canvas2D ソフトレンダラ／外部ライブラリなし） ---------- */
 
-  var three = {ready:false, needs:true};
+  var FOV = 42 * Math.PI / 180, NEAR = 0.08;
+  var LIGHT = norm({x:-0.34, y:0.87, z:-0.36});
+
+  var v3d = {
+    ready:false, needs:true, ctx:null, w:0, h:0, dpr:1,
+    orbit:{az:-0.95, pol:1.0, dist:8, target:{x:0, y:0, z:0}}
+  };
+
+  function sub(a,b){ return {x:a.x-b.x, y:a.y-b.y, z:a.z-b.z}; }
+  function dot(a,b){ return a.x*b.x + a.y*b.y + a.z*b.z; }
+  function cross(a,b){ return {x:a.y*b.z-a.z*b.y, y:a.z*b.x-a.x*b.z, z:a.x*b.y-a.y*b.x}; }
+  function norm(a){ var l = Math.sqrt(dot(a,a)) || 1; return {x:a.x/l, y:a.y/l, z:a.z/l}; }
+
+  function hexRGB(hex){
+    hex = (hex || "").trim();
+    if(hex.charAt(0) === "#") hex = hex.slice(1);
+    if(hex.length === 3) hex = hex[0]+hex[0]+hex[1]+hex[1]+hex[2]+hex[2];
+    var n = parseInt(hex, 16);
+    if(isNaN(n)) return {r:130, g:145, b:160};
+    return {r:(n>>16)&255, g:(n>>8)&255, b:n&255};
+  }
+  function shade(hex, k, alpha){
+    var c = hexRGB(hex);
+    var r = clamp(Math.round(c.r*k), 0, 255), g = clamp(Math.round(c.g*k), 0, 255), b = clamp(Math.round(c.b*k), 0, 255);
+    return alpha == null ? "rgb("+r+","+g+","+b+")" : "rgba("+r+","+g+","+b+","+alpha+")";
+  }
+
+  function camera(){
+    var o = v3d.orbit;
+    o.pol = clamp(o.pol, 0.10, Math.PI/2 - 0.03);
+    o.dist = clamp(o.dist, 0.8, 60);
+    v3d.eye = {
+      x: o.target.x + o.dist * Math.sin(o.pol) * Math.sin(o.az),
+      y: o.target.y + o.dist * Math.cos(o.pol),
+      z: o.target.z + o.dist * Math.sin(o.pol) * Math.cos(o.az)
+    };
+    v3d.zA = norm(sub(v3d.eye, o.target));
+    v3d.xA = norm(cross({x:0,y:1,z:0}, v3d.zA));
+    v3d.yA = cross(v3d.zA, v3d.xA);
+    v3d.f = (v3d.h/2) / Math.tan(FOV/2);
+  }
+
+  function toCam(p){
+    var d = sub(p, v3d.eye);
+    return {x: dot(d, v3d.xA), y: dot(d, v3d.yA), z: dot(d, v3d.zA)};
+  }
+  function project(c){
+    var iz = v3d.f / (-c.z);
+    return {x: v3d.w/2 + c.x*iz, y: v3d.h/2 - c.y*iz};
+  }
+  function clipNear(poly){
+    var out = [], n = poly.length, i;
+    for(i=0;i<n;i++){
+      var a = poly[i], b = poly[(i+1)%n];
+      var ain = a.z <= -NEAR, bin = b.z <= -NEAR;
+      if(ain) out.push(a);
+      if(ain !== bin){
+        var t = (-NEAR - a.z) / (b.z - a.z);
+        out.push({x:a.x+(b.x-a.x)*t, y:a.y+(b.y-a.y)*t, z:-NEAR});
+      }
+    }
+    return out;
+  }
+  // 世界座標の多角形をスクリーン座標に。手前でクリップされたら null。
+  function poly2d(pts){
+    var cam = [], i;
+    for(i=0;i<pts.length;i++) cam.push(toCam(pts[i]));
+    cam = clipNear(cam);
+    if(cam.length < 3) return null;
+    var out = [], depth = 0;
+    for(i=0;i<cam.length;i++){
+      out.push(project(cam[i]));
+      depth += Math.sqrt(cam[i].x*cam[i].x + cam[i].y*cam[i].y + cam[i].z*cam[i].z);
+    }
+    out.depth = depth / cam.length;
+    return out;
+  }
+  function fillPoly(ctx, pts, fill, stroke, lw, alpha){
+    if(!pts || pts.length < 3) return;
+    ctx.beginPath();
+    ctx.moveTo(pts[0].x, pts[0].y);
+    for(var i=1;i<pts.length;i++) ctx.lineTo(pts[i].x, pts[i].y);
+    ctx.closePath();
+    if(alpha != null) ctx.globalAlpha = alpha;
+    if(fill){ ctx.fillStyle = fill; ctx.fill(); }
+    if(stroke){ ctx.strokeStyle = stroke; ctx.lineWidth = lw || 1; ctx.stroke(); }
+    ctx.globalAlpha = 1;
+  }
+
+  // 家具ボックスの8頂点（メートル）
+  function boxPoints(it){
+    var r = rad(it), c = Math.cos(r), s = Math.sin(r);
+    var cx = it.x/1000, cz = it.y/1000;
+    var hw = it.w/2000, hd = it.d/2000;
+    var y0 = (it.z||0)/1000, y1 = y0 + Math.max(it.h, 20)/1000;
+    var base = [[-hw,-hd],[hw,-hd],[hw,hd],[-hw,hd]], p = [], i;
+    for(i=0;i<4;i++){
+      var px = base[i][0], py = base[i][1];
+      p.push({x: cx + px*c - py*s, z: cz + px*s + py*c});
+    }
+    return {
+      bottom: p.map(function(q){ return {x:q.x, y:y0, z:q.z}; }),
+      top: p.map(function(q){ return {x:q.x, y:y1, z:q.z}; }),
+      y0:y0, y1:y1
+    };
+  }
+
+  function boxFaces(it){
+    var b = boxPoints(it), f = [], i;
+    f.push({pts:[b.top[0], b.top[1], b.top[2], b.top[3]], n:{x:0,y:1,z:0}});
+    f.push({pts:[b.bottom[3], b.bottom[2], b.bottom[1], b.bottom[0]], n:{x:0,y:-1,z:0}});
+    for(i=0;i<4;i++){
+      var j = (i+1)%4;
+      var a = b.bottom[i], c2 = b.bottom[j];
+      var e = {x:c2.x-a.x, y:0, z:c2.z-a.z};
+      f.push({pts:[b.bottom[i], b.bottom[j], b.top[j], b.top[i]], n:norm({x:e.z, y:0, z:-e.x})});
+    }
+    return f;
+  }
 
   function initThree(){
-    if(typeof THREE === "undefined") return false;
-    var canvas = el.three;
-    three.renderer = new THREE.WebGLRenderer({canvas:canvas, antialias:true});
-    three.renderer.setPixelRatio(Math.min(window.devicePixelRatio||1, 2));
-    three.renderer.shadowMap.enabled = true;
-    three.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-
-    three.scene = new THREE.Scene();
-    three.camera = new THREE.PerspectiveCamera(42, 1, 0.05, 200);
-
-    three.orbit = {az: -0.9, pol: 1.02, dist: 8};
-
-    three.hemi = new THREE.HemisphereLight(0xffffff, 0x8899aa, 0.85);
-    three.scene.add(three.hemi);
-    three.sun = new THREE.DirectionalLight(0xffffff, 0.75);
-    three.sun.castShadow = true;
-    three.sun.shadow.mapSize.set(1024,1024);
-    three.scene.add(three.sun);
-    three.scene.add(three.sun.target);
-
-    three.roomGroup = new THREE.Group();
-    three.itemGroup = new THREE.Group();
-    three.scene.add(three.roomGroup);
-    three.scene.add(three.itemGroup);
-
-    three.raycaster = new THREE.Raycaster();
-    three.floorPlane = new THREE.Plane(new THREE.Vector3(0,1,0), 0);
-
-    three.ready = true;
+    var ctx = null;
+    try{ ctx = el.three.getContext("2d"); }catch(e){ ctx = null; }
+    if(!ctx) return false;
+    v3d.ctx = ctx;
+    v3d.ready = true;
     buildRoom();
-    syncItems();
-    applySceneTheme();
     resize();
     loop();
     return true;
   }
 
-  function disposeGroup(g){
-    for(var i=g.children.length-1;i>=0;i--){
-      var o = g.children[i];
-      o.traverse(function(n){
-        if(n.geometry) n.geometry.dispose();
-        if(n.material){ if(Array.isArray(n.material)) n.material.forEach(function(m){m.dispose();}); else n.material.dispose(); }
-      });
-      g.remove(o);
-    }
-  }
-
+  // 部屋の寸法が変わったら視点を組み直す
   function buildRoom(){
-    if(!three.ready) return;
-    disposeGroup(three.roomGroup);
+    if(!v3d.ready) return;
     var W = state.room.w/1000, D = state.room.d/1000, H = state.room.h/1000;
-
-    var floorMat = new THREE.MeshStandardMaterial({color:new THREE.Color(css("--scene-floor")||"#cfd8e2"), roughness:.95, metalness:0});
-    var floor = new THREE.Mesh(new THREE.PlaneGeometry(W, D), floorMat);
-    floor.rotation.x = -Math.PI/2;
-    floor.position.set(W/2, 0, D/2);
-    floor.receiveShadow = true;
-    three.roomGroup.add(floor);
-
-    // 500mm グリッド
-    var gpts = [], step = 0.5, x, z;
-    for(x=0;x<=W+1e-6;x+=step){ gpts.push(Math.min(x,W),0.002,0, Math.min(x,W),0.002,D); }
-    for(z=0;z<=D+1e-6;z+=step){ gpts.push(0,0.002,Math.min(z,D), W,0.002,Math.min(z,D)); }
-    var gg = new THREE.BufferGeometry();
-    gg.setAttribute("position", new THREE.Float32BufferAttribute(gpts, 3));
-    three.grid = new THREE.LineSegments(gg, new THREE.LineBasicMaterial({color:new THREE.Color(css("--scene-line")||"#9fb0c1"), transparent:true, opacity:.45}));
-    three.roomGroup.add(three.grid);
-
-    var wallMat = new THREE.MeshStandardMaterial({color:new THREE.Color(css("--scene-wall")||"#eef2f7"), roughness:1, metalness:0, side:THREE.DoubleSide});
-    three.walls = [];
-    var defs = [
-      {w:W, pos:[W/2, H/2, 0], rot:0, n:[0,0,-1]},
-      {w:W, pos:[W/2, H/2, D], rot:Math.PI, n:[0,0,1]},
-      {w:D, pos:[0, H/2, D/2], rot:-Math.PI/2, n:[-1,0,0]},
-      {w:D, pos:[W, H/2, D/2], rot:Math.PI/2, n:[1,0,0]}
-    ];
-    defs.forEach(function(def){
-      var m = new THREE.Mesh(new THREE.PlaneGeometry(def.w, H), wallMat);
-      m.position.set(def.pos[0], def.pos[1], def.pos[2]);
-      m.rotation.y = def.rot;
-      m.receiveShadow = true;
-      m.userData.normal = new THREE.Vector3(def.n[0], def.n[1], def.n[2]);
-      three.walls.push(m);
-      three.roomGroup.add(m);
-      var eg = new THREE.LineSegments(new THREE.EdgesGeometry(m.geometry), new THREE.LineBasicMaterial({color:new THREE.Color(css("--scene-line")||"#9fb0c1")}));
-      eg.position.copy(m.position); eg.rotation.y = def.rot;
-      m.userData.edge = eg;
-      three.roomGroup.add(eg);
-    });
-
-    three.orbit.target = new THREE.Vector3(W/2, H*0.35, D/2);
-    var span = Math.max(W, D, H);
-    three.orbit.dist = Math.min(Math.max(span*1.9, 3), 24);
-
-    three.sun.position.set(W*0.4, H*3, -D*0.5);
-    three.sun.target.position.set(W/2, 0, D/2);
-    var sc = three.sun.shadow.camera;
-    var ext = Math.max(W, D) * 1.1;
-    sc.left = -ext; sc.right = ext; sc.top = ext; sc.bottom = -ext; sc.near = .5; sc.far = H*6 + ext*2;
-    sc.updateProjectionMatrix();
-
-    three.needs = true;
+    v3d.orbit.target = {x: W/2, y: H*0.34, z: D/2};
+    v3d.orbit.dist = clamp(Math.max(W, D, H) * 2.0, 2.4, 26);
+    v3d.needs = true;
   }
 
-  function syncItems(){
-    if(!three.ready) return;
-    disposeGroup(three.itemGroup);
-    three.pickables = [];
-    var res = analyze();
-    state.items.forEach(function(it){
-      var w = it.w/1000, d = it.d/1000, h = Math.max(it.h,20)/1000, z = (it.z||0)/1000;
-      var isSel = it.id === state.selected;
-      var col = new THREE.Color(res.clash[it.id] ? (css("--bad")||"#bb3c2e") : it.color);
-      var mat = new THREE.MeshStandardMaterial({color:col, roughness:.72, metalness:.02});
-      var mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
-      mesh.position.set(it.x/1000, z + h/2, it.y/1000);
-      mesh.rotation.y = -rad(it);
-      mesh.castShadow = true; mesh.receiveShadow = true;
-      mesh.userData.id = it.id;
-      three.itemGroup.add(mesh);
-      three.pickables.push(mesh);
-
-      var edge = new THREE.LineSegments(
-        new THREE.EdgesGeometry(mesh.geometry),
-        new THREE.LineBasicMaterial({color:new THREE.Color(isSel ? (css("--accent")||"#1c6fb0") : "#0d151d"), transparent:true, opacity: isSel ? 1 : .35, linewidth:1})
-      );
-      edge.position.copy(mesh.position); edge.rotation.y = mesh.rotation.y;
-      if(isSel) edge.scale.set(1.012,1.012,1.012);
-      three.itemGroup.add(edge);
-
-      if(state.showClear && it.clear > 0){
-        var cr = clearRect(it);
-        var zoneMat = new THREE.MeshBasicMaterial({color:new THREE.Color(css("--accent")||"#1c6fb0"), transparent:true, opacity:.14, side:THREE.DoubleSide, depthWrite:false});
-        var zone = new THREE.Mesh(new THREE.PlaneGeometry(cr.w/1000, cr.d/1000), zoneMat);
-        zone.rotation.x = -Math.PI/2;
-        zone.rotation.z = rad(it);
-        zone.position.set(cr.x/1000, 0.004, cr.y/1000);
-        three.itemGroup.add(zone);
-      }
-    });
-    three.needs = true;
-  }
-
-  function applySceneTheme(){
-    if(!three.ready) return;
-    three.scene.background = new THREE.Color(css("--scene-bg")||"#dde4ec");
-    buildRoom();
-    syncItems();
-  }
-
-  function updateCamera(){
-    var o = three.orbit;
-    if(!o.target) return;
-    o.pol = clamp(o.pol, 0.12, Math.PI/2 - 0.02);
-    var x = o.target.x + o.dist * Math.sin(o.pol) * Math.sin(o.az);
-    var y = o.target.y + o.dist * Math.cos(o.pol);
-    var z = o.target.z + o.dist * Math.sin(o.pol) * Math.cos(o.az);
-    three.camera.position.set(x, y, z);
-    three.camera.lookAt(o.target);
-
-    if(three.walls){
-      var dir = new THREE.Vector3().subVectors(three.camera.position, o.target);
-      three.walls.forEach(function(wm){
-        var hidden = wm.userData.normal.dot(dir) > 0;
-        wm.visible = !hidden;
-        if(wm.userData.edge) wm.userData.edge.visible = !hidden;
-      });
-    }
-  }
+  function syncItems(){ v3d.needs = true; }
+  function applySceneTheme(){ v3d.needs = true; }
 
   function loop(){
     requestAnimationFrame(loop);
-    if(!three.ready || state.view !== "3d" || !three.needs) return;
-    three.needs = false;
-    updateCamera();
-    three.renderer.render(three.scene, three.camera);
+    if(!v3d.ready || state.view !== "3d" || !v3d.needs) return;
+    if(v3d.w < 4 || v3d.h < 4) return;
+    v3d.needs = false;
+    render3d();
+  }
+
+  function render3d(){
+    var ctx = v3d.ctx;
+    camera();
+    ctx.save();
+    ctx.setTransform(v3d.dpr, 0, 0, v3d.dpr, 0, 0);
+    ctx.clearRect(0, 0, v3d.w, v3d.h);
+    ctx.fillStyle = css("--scene-bg") || "#dde4ec";
+    ctx.fillRect(0, 0, v3d.w, v3d.h);
+
+    var W = state.room.w/1000, D = state.room.d/1000, H = state.room.h/1000;
+    var lineCol = css("--scene-line") || "#9fb0c1";
+    var floorCol = css("--scene-floor") || "#cfd8e2";
+    var wallCol = css("--scene-wall") || "#eef2f7";
+    var accent = css("--accent") || "#1c6fb0";
+    var badCol = css("--bad") || "#bb3c2e";
+    var res = analyze();
+
+    // 床
+    fillPoly(ctx, poly2d([{x:0,y:0,z:0},{x:W,y:0,z:0},{x:W,y:0,z:D},{x:0,y:0,z:D}]), floorCol, null, 0);
+
+    // 500mm グリッド
+    ctx.globalAlpha = .55;
+    ctx.strokeStyle = lineCol;
+    ctx.lineWidth = 1;
+    var g, seg;
+    for(g=0; g<=W+1e-6; g+=0.5){
+      seg = poly2d([{x:Math.min(g,W),y:0.001,z:0},{x:Math.min(g,W),y:0.001,z:D}]);
+      if(seg && seg.length >= 2){ ctx.beginPath(); ctx.moveTo(seg[0].x, seg[0].y); ctx.lineTo(seg[1].x, seg[1].y); ctx.stroke(); }
+    }
+    for(g=0; g<=D+1e-6; g+=0.5){
+      seg = poly2d([{x:0,y:0.001,z:Math.min(g,D)},{x:W,y:0.001,z:Math.min(g,D)}]);
+      if(seg && seg.length >= 2){ ctx.beginPath(); ctx.moveTo(seg[0].x, seg[0].y); ctx.lineTo(seg[1].x, seg[1].y); ctx.stroke(); }
+    }
+    ctx.globalAlpha = 1;
+
+    // 使用スペース
+    if(state.showClear){
+      state.items.forEach(function(it){
+        var cr = clearRect(it);
+        if(!cr) return;
+        var zone = {x:cr.x, y:cr.y, w:cr.w, d:cr.d, rot:cr.rot, z:0, h:1};
+        var pts = corners(zone).map(function(q){ return {x:q.x/1000, y:0.002, z:q.y/1000}; });
+        fillPoly(ctx, poly2d(pts), accent, accent, 1, .16);
+      });
+    }
+
+    // 接地影
+    state.items.forEach(function(it){
+      var b = boxPoints(it);
+      var hgt = Math.max(it.h, 20)/1000;
+      var off = Math.min(hgt, 0.55) * 0.45;
+      var ox = -LIGHT.x / LIGHT.y * off, oz = -LIGHT.z / LIGHT.y * off;
+      var pts = b.bottom.map(function(q){ return {x:q.x+ox, y:0.003, z:q.z+oz}; });
+      fillPoly(ctx, poly2d(pts), "rgba(10,18,26,1)", null, 0, .13);
+    });
+
+    // 壁（カメラ側の壁は消す）
+    var eyeDir = sub(v3d.eye, v3d.orbit.target);
+    var walls = [
+      {n:{x:0,y:0,z:-1}, pts:[{x:0,y:0,z:0},{x:W,y:0,z:0},{x:W,y:H,z:0},{x:0,y:H,z:0}], k:0.99},
+      {n:{x:0,y:0,z:1},  pts:[{x:W,y:0,z:D},{x:0,y:0,z:D},{x:0,y:H,z:D},{x:W,y:H,z:D}], k:0.99},
+      {n:{x:-1,y:0,z:0}, pts:[{x:0,y:0,z:D},{x:0,y:0,z:0},{x:0,y:H,z:0},{x:0,y:H,z:D}], k:0.88},
+      {n:{x:1,y:0,z:0},  pts:[{x:W,y:0,z:0},{x:W,y:0,z:D},{x:W,y:H,z:D},{x:W,y:H,z:0}], k:0.88}
+    ];
+    walls.forEach(function(wl){
+      if(dot(wl.n, eyeDir) > 0) return;
+      fillPoly(ctx, poly2d(wl.pts), shade(wallCol, wl.k), lineCol, 1);
+    });
+
+    // 家具（奥から手前へ）
+    var drawn = [];
+    state.items.forEach(function(it){
+      var clash = !!res.clash[it.id];
+      var isSel = it.id === state.selected;
+      var base = clash ? badCol : it.color;
+      boxFaces(it).forEach(function(face){
+        if(dot(face.n, sub(v3d.eye, face.pts[0])) <= 0) return;
+        var pts = poly2d(face.pts);
+        if(!pts) return;
+        var lit = 0.62 + 0.38 * Math.max(0, dot(face.n, LIGHT));
+        drawn.push({
+          pts: pts, depth: pts.depth,
+          fill: shade(base, lit, (it.z||0) > 0 ? 0.75 : 1),
+          stroke: isSel ? accent : shade(base, 0.55),
+          lw: isSel ? 2 : 1
+        });
+      });
+    });
+    drawn.sort(function(a,b){ return b.depth - a.depth; });
+    drawn.forEach(function(d){ fillPoly(ctx, d.pts, d.fill, d.stroke, d.lw); });
+
+    // 家具名
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.font = '500 11px "Zen Kaku Gothic New", system-ui, sans-serif';
+    state.items.forEach(function(it){
+      var b = boxPoints(it);
+      var top = poly2d(b.top);
+      if(!top) return;
+      var minx = Infinity, maxx = -Infinity, miny = Infinity, maxy = -Infinity, cx = 0, cy = 0;
+      top.forEach(function(q){
+        if(q.x<minx)minx=q.x; if(q.x>maxx)maxx=q.x;
+        if(q.y<miny)miny=q.y; if(q.y>maxy)maxy=q.y;
+        cx += q.x; cy += q.y;
+      });
+      if(maxx - minx < 54) return;
+      cx /= top.length; cy /= top.length;
+      var tw = ctx.measureText(it.name).width;
+      ctx.globalAlpha = .82;
+      ctx.fillStyle = css("--surface") || "#fff";
+      ctx.fillRect(cx - tw/2 - 5, cy - 8, tw + 10, 16);
+      ctx.globalAlpha = 1;
+      ctx.fillStyle = it.id === state.selected ? accent : (css("--ink-2") || "#4b5c6d");
+      ctx.fillText(it.name, cx, cy);
+    });
+
+    ctx.restore();
   }
 
   /* ---------- 3D 操作 ---------- */
 
   var drag = null;
 
-  function pointerNDC(e, rect){
-    return new THREE.Vector2(
-      ((e.clientX - rect.left) / rect.width) * 2 - 1,
-      -((e.clientY - rect.top) / rect.height) * 2 + 1
-    );
+  function rayFrom(px, py){
+    var sx = px - v3d.w/2, sy = v3d.h/2 - py;
+    return {
+      o: v3d.eye,
+      d: norm({
+        x: v3d.xA.x*sx + v3d.yA.x*sy - v3d.zA.x*v3d.f,
+        y: v3d.xA.y*sx + v3d.yA.y*sy - v3d.zA.y*v3d.f,
+        z: v3d.xA.z*sx + v3d.yA.z*sy - v3d.zA.z*v3d.f
+      })
+    };
   }
 
-  function floorPoint(e, rect){
-    var ndc = pointerNDC(e, rect);
-    three.raycaster.setFromCamera(ndc, three.camera);
-    var p = new THREE.Vector3();
-    if(!three.raycaster.ray.intersectPlane(three.floorPlane, p)) return null;
-    return {x: p.x*1000, y: p.z*1000};
+  function rayFloor(ray){
+    if(Math.abs(ray.d.y) < 1e-6) return null;
+    var t = -ray.o.y / ray.d.y;
+    if(t <= 0) return null;
+    return {x:(ray.o.x + ray.d.x*t) * 1000, y:(ray.o.z + ray.d.z*t) * 1000};
+  }
+
+  function pickItem(ray){
+    var best = null, bestT = Infinity;
+    state.items.forEach(function(it){
+      var r = rad(it), c = Math.cos(r), s = Math.sin(r);
+      var ox = ray.o.x - it.x/1000, oz = ray.o.z - it.y/1000;
+      var lo = [ox*c + oz*s, ray.o.y, -ox*s + oz*c];
+      var ld = [ray.d.x*c + ray.d.z*s, ray.d.y, -ray.d.x*s + ray.d.z*c];
+      var y0 = (it.z||0)/1000, y1 = y0 + Math.max(it.h, 20)/1000;
+      var lim = [[-it.w/2000, it.w/2000], [y0, y1], [-it.d/2000, it.d/2000]];
+      var t0 = 0, t1 = Infinity, i, a, b, tmp;
+      for(i=0;i<3;i++){
+        if(Math.abs(ld[i]) < 1e-9){
+          if(lo[i] < lim[i][0] || lo[i] > lim[i][1]){ t1 = -1; break; }
+          continue;
+        }
+        a = (lim[i][0] - lo[i]) / ld[i];
+        b = (lim[i][1] - lo[i]) / ld[i];
+        if(a > b){ tmp = a; a = b; b = tmp; }
+        if(a > t0) t0 = a;
+        if(b < t1) t1 = b;
+        if(t0 > t1){ t1 = -1; break; }
+      }
+      if(t1 >= 0 && t0 <= t1 && t0 < bestT){ bestT = t0; best = it; }
+    });
+    return best;
+  }
+
+  function localPoint(e){
+    var r = el.three.getBoundingClientRect();
+    return {x: e.clientX - r.left, y: e.clientY - r.top};
   }
 
   el.three.addEventListener("pointerdown", function(e){
-    if(!three.ready || state.view !== "3d") return;
+    if(!v3d.ready || state.view !== "3d") return;
     el.three.setPointerCapture(e.pointerId);
-    var rect = el.three.getBoundingClientRect();
-    var ndc = pointerNDC(e, rect);
-    three.raycaster.setFromCamera(ndc, three.camera);
-    var hits = three.raycaster.intersectObjects(three.pickables || [], false);
-    if(hits.length && e.button === 0){
-      var id = hits[0].object.userData.id;
-      select(id);
-      var it = selected();
-      var fp = floorPoint(e, rect);
-      if(it && fp) drag = {mode:"item", id:id, dx: it.x - fp.x, dy: it.y - fp.y};
+    var p = localPoint(e);
+    var ray = rayFrom(p.x, p.y);
+    var hit = e.button === 0 ? pickItem(ray) : null;
+    if(hit){
+      select(hit.id);
+      var fp = rayFloor(ray);
+      drag = {mode:"item", id:hit.id, dx: fp ? hit.x - fp.x : 0, dy: fp ? hit.y - fp.y : 0};
     } else {
+      if(e.button === 0) select(null);
       drag = {mode:"orbit", x:e.clientX, y:e.clientY};
-      if(e.button === 0 && !hits.length) select(null);
     }
   });
 
   el.three.addEventListener("pointermove", function(e){
-    if(!drag || !three.ready) return;
+    if(!drag || !v3d.ready) return;
     if(drag.mode === "orbit"){
-      three.orbit.az -= (e.clientX - drag.x) * 0.008;
-      three.orbit.pol -= (e.clientY - drag.y) * 0.006;
+      v3d.orbit.az -= (e.clientX - drag.x) * 0.008;
+      v3d.orbit.pol -= (e.clientY - drag.y) * 0.006;
       drag.x = e.clientX; drag.y = e.clientY;
-      three.needs = true;
+      v3d.needs = true;
     } else {
-      var rect = el.three.getBoundingClientRect();
-      var fp = floorPoint(e, rect);
-      if(!fp) return;
+      var p = localPoint(e);
+      var fp = rayFloor(rayFrom(p.x, p.y));
       var it = selected();
-      if(!it) return;
+      if(!fp || !it) return;
       it.x = snapValue(fp.x + drag.dx);
       it.y = snapValue(fp.y + drag.dy);
       snapToWalls(it);
       touch();
-      syncItems(); renderInspector(); renderStats(); renderList();
+      v3d.needs = true;
+      renderInspector(); renderStats(); renderList();
       scheduleSave();
     }
   });
@@ -707,10 +829,10 @@
   el.three.addEventListener("pointercancel", endDrag);
 
   el.three.addEventListener("wheel", function(e){
-    if(state.view !== "3d" || !three.ready) return;
+    if(state.view !== "3d" || !v3d.ready) return;
     e.preventDefault();
-    three.orbit.dist = clamp(three.orbit.dist * (1 + Math.sign(e.deltaY)*0.09), 1.2, 40);
-    three.needs = true;
+    v3d.orbit.dist = clamp(v3d.orbit.dist * (1 + Math.sign(e.deltaY)*0.09), 0.8, 60);
+    v3d.needs = true;
   }, {passive:false});
 
   /* ---------- 平面図 ---------- */
@@ -950,7 +1072,7 @@
     el.hint.textContent = v === "3d"
       ? "ドラッグで視点回転／家具をつかんで移動／ホイールでズーム"
       : "家具をドラッグで移動／選択すると壁からの寸法を表示";
-    if(v === "3d"){ three.needs = true; resize(); } else { planResize(); }
+    if(v === "3d"){ v3d.needs = true; resize(); } else { planResize(); }
   }
 
   function select(id){
@@ -1253,11 +1375,12 @@
 
   function resize(){
     var r = el.stage.getBoundingClientRect();
-    if(three.ready && r.width > 0 && r.height > 0){
-      three.renderer.setSize(r.width, r.height, false);
-      three.camera.aspect = r.width / Math.max(r.height, 1);
-      three.camera.updateProjectionMatrix();
-      three.needs = true;
+    if(v3d.ready && r.width > 0 && r.height > 0){
+      var dpr = Math.min(window.devicePixelRatio || 1, 2);
+      v3d.dpr = dpr; v3d.w = r.width; v3d.h = r.height;
+      el.three.width = Math.round(r.width * dpr);
+      el.three.height = Math.round(r.height * dpr);
+      v3d.needs = true;
     }
     if(!el.plan.hidden) planResize();
   }
@@ -1394,11 +1517,13 @@
   renderAll();
   setSaveState("", "この端末に保存中");
 
-  if(!initThree()){
+  try{
+    if(!initThree()) throw new Error("no 2d context");
+  }catch(err){
     el.three.hidden = true;
     setView("plan");
     el.btn3d.disabled = true;
-    el.btn3d.title = "3D表示を読み込めませんでした";
+    el.btn3d.title = "この環境では3D表示を使えません";
   }
   planResize();
 
