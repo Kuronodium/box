@@ -1,0 +1,1428 @@
+<title>部屋レイアウト検討室</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Zen+Kaku+Gothic+New:wght@400;500;700&family=JetBrains+Mono:wght@400;500;700&display=swap">
+<style>
+  :root{
+    --paper:#e7ecf2; --surface:#ffffff; --surface-2:#f2f5f9; --surface-3:#e4eaf1;
+    --ink:#15202c; --ink-2:#4b5c6d; --ink-3:#7b8c9c;
+    --line:#c8d3df; --line-2:#a5b5c5;
+    --accent:#1c6fb0; --accent-2:#d9e8f5;
+    --ok:#2c7a55; --warn:#9a6a14; --bad:#bb3c2e;
+    --scene-bg:#dde4ec; --scene-floor:#cfd8e2; --scene-wall:#eef2f7; --scene-line:#9fb0c1;
+    --shadow:0 1px 2px rgba(21,32,44,.08), 0 8px 24px -14px rgba(21,32,44,.35);
+  }
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]){
+      --paper:#0d151d; --surface:#151f2a; --surface-2:#1a2632; --surface-3:#22303e;
+      --ink:#e4ecf4; --ink-2:#a3b4c4; --ink-3:#77899a;
+      --line:#2a3949; --line-2:#3b4d60;
+      --accent:#5aa8e4; --accent-2:#18324a;
+      --ok:#57b287; --warn:#d2a24a; --bad:#e2695a;
+      --scene-bg:#0c141c; --scene-floor:#1b2732; --scene-wall:#24313e; --scene-line:#42566a;
+      --shadow:0 1px 2px rgba(0,0,0,.4), 0 8px 24px -14px rgba(0,0,0,.8);
+    }
+  }
+  :root[data-theme="dark"]{
+    --paper:#0d151d; --surface:#151f2a; --surface-2:#1a2632; --surface-3:#22303e;
+    --ink:#e4ecf4; --ink-2:#a3b4c4; --ink-3:#77899a;
+    --line:#2a3949; --line-2:#3b4d60;
+    --accent:#5aa8e4; --accent-2:#18324a;
+    --ok:#57b287; --warn:#d2a24a; --bad:#e2695a;
+    --scene-bg:#0c141c; --scene-floor:#1b2732; --scene-wall:#24313e; --scene-line:#42566a;
+    --shadow:0 1px 2px rgba(0,0,0,.4), 0 8px 24px -14px rgba(0,0,0,.8);
+  }
+
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{
+    margin:0; background:var(--paper); color:var(--ink);
+    font-family:"Zen Kaku Gothic New", system-ui, -apple-system, "Hiragino Kaku Gothic ProN", "Noto Sans JP", sans-serif;
+    font-size:14px; line-height:1.6; -webkit-text-size-adjust:100%;
+  }
+  .mono{font-family:"JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace; font-variant-numeric:tabular-nums}
+  button{font:inherit; color:inherit}
+
+  #app{height:100%; display:flex; flex-direction:column; min-height:0}
+
+  header.bar{
+    display:flex; align-items:center; gap:12px; flex-wrap:wrap;
+    padding:10px 16px; padding-top:calc(10px + env(safe-area-inset-top, 0px));
+    background:var(--surface); border-bottom:1px solid var(--line);
+  }
+  header.bar h1{
+    margin:0; font-size:15px; font-weight:700; letter-spacing:.04em; white-space:nowrap;
+  }
+  header.bar h1 span{display:block; font-size:10px; font-weight:500; letter-spacing:.18em; color:var(--ink-3)}
+  .bar-spacer{flex:1 1 auto}
+
+  .seg{display:inline-flex; border:1px solid var(--line-2); border-radius:6px; overflow:hidden; background:var(--surface-2)}
+  .seg button{
+    appearance:none; border:0; background:transparent; padding:6px 14px; font-size:13px; font-weight:500;
+    cursor:pointer; color:var(--ink-2);
+  }
+  .seg button[aria-pressed="true"]{background:var(--accent); color:#fff}
+  .seg button:focus-visible{outline:2px solid var(--accent); outline-offset:-2px}
+
+  .save-state{display:flex; align-items:center; gap:6px; font-size:12px; color:var(--ink-3); white-space:nowrap}
+  .dot{width:7px; height:7px; border-radius:50%; background:var(--ink-3); flex:none}
+  .dot.on{background:var(--ok)}
+  .dot.busy{background:var(--warn)}
+
+  main{flex:1 1 auto; display:grid; grid-template-columns:minmax(0,1fr) 380px; min-height:0}
+
+  #stage{position:relative; min-width:0; min-height:0; background:var(--scene-bg); overflow:hidden}
+  #stage canvas{display:block; width:100%; height:100%; touch-action:none}
+  #plan{position:absolute; inset:0}
+
+  .hud{position:absolute; left:12px; bottom:12px; display:flex; gap:8px; flex-wrap:wrap; max-width:calc(100% - 24px); pointer-events:none}
+  .chip{
+    background:color-mix(in srgb, var(--surface) 88%, transparent); border:1px solid var(--line);
+    border-radius:5px; padding:4px 9px; font-size:11px; color:var(--ink-2); box-shadow:var(--shadow);
+  }
+  .chip b{font-family:"JetBrains Mono", monospace; font-variant-numeric:tabular-nums; color:var(--ink); font-weight:500}
+  .chip.bad{border-color:var(--bad); color:var(--bad)}
+  .chip.bad b{color:var(--bad)}
+  .hint{
+    position:absolute; right:12px; top:12px; font-size:11px; color:var(--ink-3);
+    background:color-mix(in srgb, var(--surface) 80%, transparent); border:1px solid var(--line);
+    border-radius:5px; padding:4px 9px; pointer-events:none;
+  }
+
+  aside#panel{
+    background:var(--surface); border-left:1px solid var(--line);
+    overflow-y:auto; overscroll-behavior:contain; min-height:0;
+    padding:0 0 calc(24px + env(safe-area-inset-bottom, 0px));
+  }
+  section.block{padding:14px 16px; border-bottom:1px solid var(--line)}
+  section.block > h2{
+    margin:0 0 10px; font-size:11px; font-weight:700; letter-spacing:.16em; color:var(--ink-3);
+    display:flex; align-items:center; gap:8px;
+  }
+  section.block > h2::after{content:""; flex:1; height:1px; background:var(--line)}
+
+  .row{display:flex; gap:8px; flex-wrap:wrap; align-items:flex-end}
+  .field{display:flex; flex-direction:column; gap:3px; flex:1 1 84px; min-width:0}
+  .field label{font-size:10px; letter-spacing:.08em; color:var(--ink-3)}
+  input[type="number"], input[type="text"], select{
+    width:100%; min-width:0; padding:6px 8px; border:1px solid var(--line-2); border-radius:5px;
+    background:var(--surface-2); color:var(--ink); font-size:13px;
+    font-family:"JetBrains Mono", monospace; font-variant-numeric:tabular-nums;
+  }
+  input[type="text"]{font-family:inherit}
+  select{font-family:inherit}
+  input:focus-visible, select:focus-visible, button:focus-visible{outline:2px solid var(--accent); outline-offset:1px}
+
+  .btn{
+    appearance:none; border:1px solid var(--line-2); background:var(--surface-2); color:var(--ink);
+    border-radius:5px; padding:6px 10px; font-size:12px; cursor:pointer;
+  }
+  .btn:hover{background:var(--surface-3)}
+  .btn.primary{background:var(--accent); border-color:var(--accent); color:#fff}
+  .btn.primary:hover{filter:brightness(1.08)}
+  .btn.danger{color:var(--bad); border-color:color-mix(in srgb, var(--bad) 45%, var(--line-2))}
+  .btn[disabled]{opacity:.45; cursor:not-allowed}
+
+  .presets{display:grid; grid-template-columns:repeat(2, minmax(0,1fr)); gap:6px}
+  .preset{
+    display:flex; flex-direction:column; align-items:flex-start; gap:1px; text-align:left;
+    border:1px solid var(--line); background:var(--surface-2); border-radius:6px; padding:7px 9px; cursor:pointer;
+  }
+  .preset:hover{border-color:var(--accent); background:var(--accent-2)}
+  .preset .sw{width:100%; height:3px; border-radius:2px; margin-bottom:3px}
+  .preset b{font-size:12px; font-weight:500}
+  .preset small{font-size:10px; color:var(--ink-3); font-family:"JetBrains Mono", monospace}
+
+  ul.items{list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:4px}
+  ul.items li{
+    display:flex; align-items:center; gap:8px; padding:6px 8px; border-radius:5px; cursor:pointer;
+    border:1px solid transparent; background:var(--surface-2);
+  }
+  ul.items li:hover{border-color:var(--line-2)}
+  ul.items li[aria-selected="true"]{border-color:var(--accent); background:var(--accent-2)}
+  ul.items li .swatch{width:10px; height:10px; border-radius:2px; flex:none}
+  ul.items li .nm{flex:1 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:13px}
+  ul.items li .dim{font-size:10px; color:var(--ink-3); font-family:"JetBrains Mono", monospace; white-space:nowrap}
+  ul.items li .flag{font-size:10px; color:var(--bad); font-weight:700}
+  .empty{font-size:12px; color:var(--ink-3); padding:4px 0}
+
+  .stats{display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px}
+  .stat{border:1px solid var(--line); border-radius:6px; padding:7px 9px; background:var(--surface-2)}
+  .stat dt{font-size:10px; color:var(--ink-3); letter-spacing:.06em; margin:0}
+  .stat dd{margin:2px 0 0; font-size:16px; font-family:"JetBrains Mono", monospace; font-variant-numeric:tabular-nums}
+  .stat dd small{font-size:10px; color:var(--ink-3); margin-left:2px}
+  .meter{height:5px; border-radius:3px; background:var(--surface-3); overflow:hidden; margin-top:8px; border:1px solid var(--line)}
+  .meter i{display:block; height:100%; background:var(--accent)}
+
+  .warnlist{margin:10px 0 0; padding:0; list-style:none; display:flex; flex-direction:column; gap:4px}
+  .warnlist li{font-size:11px; padding:5px 8px; border-radius:4px; border-left:2px solid var(--bad); background:color-mix(in srgb, var(--bad) 10%, transparent); color:var(--ink-2)}
+  .warnlist li.soft{border-left-color:var(--warn); background:color-mix(in srgb, var(--warn) 12%, transparent)}
+
+  .plans{list-style:none; margin:8px 0 0; padding:0; display:flex; flex-direction:column; gap:4px}
+  .plans li{display:flex; align-items:center; gap:6px; font-size:12px; background:var(--surface-2); border:1px solid var(--line); border-radius:5px; padding:5px 8px}
+  .plans li .nm{flex:1 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+  .plans li time{font-size:10px; color:var(--ink-3); font-family:"JetBrains Mono", monospace}
+
+  .note{font-size:11px; color:var(--ink-3); margin:8px 0 0}
+  .sample-flag{display:inline-block; font-size:10px; letter-spacing:.1em; color:var(--warn); border:1px solid var(--warn); border-radius:3px; padding:1px 5px}
+
+  .toggle{display:flex; align-items:center; gap:7px; font-size:12px; color:var(--ink-2); cursor:pointer}
+  .toggle input{accent-color:var(--accent); width:14px; height:14px}
+
+  @media (max-width:880px){
+    main{grid-template-columns:minmax(0,1fr); grid-template-rows:minmax(240px, 42vh) minmax(0,1fr)}
+    aside#panel{border-left:0; border-top:1px solid var(--line)}
+    .hint{display:none}
+  }
+  @media (prefers-reduced-motion: reduce){*{transition:none !important; animation:none !important}}
+</style>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+
+<div id="app">
+  <header class="bar">
+    <h1>部屋レイアウト検討室<span>ROOM LAYOUT STUDY — mm</span></h1>
+    <div class="bar-spacer"></div>
+    <div class="seg" role="group" aria-label="表示切替">
+      <button id="btn3d" type="button" aria-pressed="true">3Dビュー</button>
+      <button id="btnplan" type="button" aria-pressed="false">平面図</button>
+    </div>
+    <div class="save-state"><span class="dot" id="savedot"></span><span id="savetext">この端末に保存中</span></div>
+  </header>
+
+  <main>
+    <div id="stage">
+      <canvas id="three"></canvas>
+      <canvas id="plan" hidden></canvas>
+      <div class="hint" id="hint">ドラッグで視点回転／家具をつかんで移動／ホイールでズーム</div>
+      <div class="hud" id="hud"></div>
+    </div>
+
+    <aside id="panel">
+      <section class="block">
+        <h2>部屋の寸法</h2>
+        <div class="row">
+          <div class="field" style="flex:1 1 100%">
+            <label for="roompreset">間取りプリセット</label>
+            <select id="roompreset"></select>
+          </div>
+        </div>
+        <div class="row" style="margin-top:8px">
+          <div class="field"><label for="roomw">間口 W (mm)</label><input type="number" id="roomw" min="900" max="12000" step="10"></div>
+          <div class="field"><label for="roomd">奥行 D (mm)</label><input type="number" id="roomd" min="900" max="12000" step="10"></div>
+          <div class="field"><label for="roomh">天井高 H (mm)</label><input type="number" id="roomh" min="1800" max="4000" step="10"></div>
+        </div>
+        <p class="note">壁の内法（有効寸法）で入力してください。床面積 <span class="mono" id="roomarea">—</span></p>
+      </section>
+
+      <section class="block">
+        <h2>家具を追加</h2>
+        <div class="presets" id="presets"></div>
+        <div class="row" style="margin-top:8px">
+          <button class="btn" id="addcustom" type="button">＋ 自由サイズで追加</button>
+        </div>
+      </section>
+
+      <section class="block">
+        <h2>選択中の家具</h2>
+        <div id="inspector"><p class="empty">家具をクリックすると寸法と位置を編集できます。</p></div>
+      </section>
+
+      <section class="block">
+        <h2>配置リスト</h2>
+        <ul class="items" id="itemlist"></ul>
+        <label class="toggle" style="margin-top:10px"><input type="checkbox" id="showclear" checked>使用スペース（引き出し・椅子引き代）を表示</label>
+        <label class="toggle" style="margin-top:6px"><input type="checkbox" id="snapon" checked>50mmグリッドと壁に吸着</label>
+      </section>
+
+      <section class="block">
+        <h2>検討メモ</h2>
+        <dl class="stats">
+          <div class="stat"><dt>床面積</dt><dd id="s-area">—<small>㎡</small></dd></div>
+          <div class="stat"><dt>家具の設置面積</dt><dd id="s-occ">—<small>㎡</small></dd></div>
+          <div class="stat"><dt>空き床</dt><dd id="s-free">—<small>㎡</small></dd></div>
+          <div class="stat"><dt>占有率</dt><dd id="s-rate">—<small>%</small></dd></div>
+        </dl>
+        <div class="meter"><i id="s-meter" style="width:0%"></i></div>
+        <ul class="warnlist" id="warnlist"></ul>
+      </section>
+
+      <section class="block">
+        <h2>プランを保存</h2>
+        <div class="row">
+          <div class="field" style="flex:2 1 140px"><label for="planname">プラン名</label><input type="text" id="planname" placeholder="案A：机を窓際"></div>
+          <button class="btn primary" id="saveplan" type="button">保存</button>
+        </div>
+        <ul class="plans" id="planlist"></ul>
+        <p class="note" id="plannote">プランを保存すると、配置案を切り替えて見比べられます。</p>
+      </section>
+    </aside>
+  </main>
+</div>
+
+<script>
+(function(){
+  "use strict";
+
+  /* ---------- 定数・プリセット ---------- */
+
+  var COLORS = ["#6b8fae","#8a9d6b","#b08968","#8a7aa8","#c08a5e","#6fa08c","#a8737a","#8695a3"];
+
+  var ROOM_PRESETS = [
+    {label:"6畳・江戸間 (2610×3520)", w:2610, d:3520},
+    {label:"6畳・中京間 (2730×3640)", w:2730, d:3640},
+    {label:"6畳・団地間 (2550×3400)", w:2550, d:3400},
+    {label:"8畳・江戸間 (3520×3520)", w:3520, d:3520},
+    {label:"4.5畳 (2610×2610)", w:2610, d:2610},
+    {label:"10畳 (3520×4400)", w:3520, d:4400},
+    {label:"カスタム", w:0, d:0}
+  ];
+
+  // clear = 正面側に必要な使用スペース(mm)。z = 床からの高さ(mm)。
+  var ITEM_PRESETS = [
+    {name:"学習机",        w:1200, d:600,  h:700,  clear:700, z:0, c:2},
+    {name:"PCデスク",      w:1400, d:700,  h:720,  clear:700, z:0, c:0},
+    {name:"デスクチェア",  w:600,  d:600,  h:950,  clear:0,   z:0, c:7, soft:true},
+    {name:"シングルベッド",w:1000, d:1950, h:450,  clear:450, z:0, c:3},
+    {name:"セミダブル",    w:1200, d:1950, h:450,  clear:450, z:0, c:3},
+    {name:"本棚",          w:880,  d:300,  h:1800, clear:450, z:0, c:5},
+    {name:"チェスト",      w:800,  d:450,  h:900,  clear:600, z:0, c:4},
+    {name:"衣装ケース",    w:600,  d:550,  h:1050, clear:600, z:0, c:4},
+    {name:"テレビ台",      w:1200, d:400,  h:450,  clear:0,   z:0, c:6},
+    {name:"ローテーブル",  w:900,  d:500,  h:400,  clear:400, z:0, c:2},
+    {name:"冷蔵庫",        w:600,  d:650,  h:1600, clear:700, z:0, c:7},
+    {name:"ドア(開口)",    w:780,  d:60,   h:2000, clear:800, z:0, c:1},
+    {name:"窓",            w:1650, d:60,   h:1100, clear:0,   z:800, c:1},
+    {name:"押入れ前",      w:1750, d:80,   h:2000, clear:800, z:0, c:1}
+  ];
+
+  var SAMPLE = {
+    room:{w:2610, d:3520, h:2400},
+    items:[
+      mk("窓",           1650,  60, 1100,   0, 800, 1305,   30,   0),
+      mk("学習机",       1200, 600,  700, 700,   0,  300,  950, 270),
+      mk("デスクチェア",  600, 600,  950,   0,   0,  950,  950, 270),
+      mk("シングルベッド",1000,1950,  450, 450,   0, 2110, 1000,   0),
+      mk("本棚",          880, 300, 1800, 450,   0,  460, 3370, 180)
+    ]
+  };
+  function mk(name,w,d,h,clear,z,x,y,rot){
+    var p = null;
+    for(var i=0;i<ITEM_PRESETS.length;i++){ if(ITEM_PRESETS[i].name===name) p=ITEM_PRESETS[i]; }
+    return {id:uid(), name:name, w:w, d:d, h:h, clear:clear, z:z, x:x, y:y, rot:rot||0,
+            color:COLORS[p?p.c:0], soft:!!(p && p.soft)};
+  }
+  function uid(){ return "i" + Math.random().toString(36).slice(2,9); }
+
+  /* ---------- 状態 ---------- */
+
+  var state = {
+    room:{w:SAMPLE.room.w, d:SAMPLE.room.d, h:SAMPLE.room.h},
+    items: SAMPLE.items.map(function(o){ return Object.assign({}, o); }),
+    selected: null,
+    view: "3d",
+    showClear: true,
+    snap: true,
+    isSample: true
+  };
+
+  var el = {};
+  ["btn3d","btnplan","savedot","savetext","stage","three","plan","hud","hint","roompreset","roomw","roomd",
+   "roomh","roomarea","presets","addcustom","inspector","itemlist","showclear","snapon","s-area","s-occ",
+   "s-free","s-rate","s-meter","warnlist","planname","saveplan","planlist","plannote"].forEach(function(id){
+    el[id] = document.getElementById(id);
+  });
+
+  /* ---------- 幾何 ---------- */
+
+  function rad(it){ return it.rot * Math.PI / 180; }
+
+  function corners(it, padW, padD){
+    var r = rad(it), c = Math.cos(r), s = Math.sin(r);
+    var hw = it.w/2 + (padW||0), hd = it.d/2 + (padD||0);
+    var pts = [[-hw,-hd],[hw,-hd],[hw,hd],[-hw,hd]], out = [];
+    for(var i=0;i<4;i++){
+      var px = pts[i][0], py = pts[i][1];
+      out.push({x: it.x + px*c - py*s, y: it.y + px*s + py*c});
+    }
+    return out;
+  }
+
+  function clearRect(it){
+    if(!it.clear || it.clear <= 0) return null;
+    var r = rad(it), c = Math.cos(r), s = Math.sin(r);
+    var off = it.d/2 + it.clear/2;
+    return {x: it.x - off*s, y: it.y + off*c, w: it.w, d: it.clear, rot: it.rot};
+  }
+
+  function bbox(it){
+    var r = rad(it), c = Math.abs(Math.cos(r)), s = Math.abs(Math.sin(r));
+    var hw = (it.w/2)*c + (it.d/2)*s, hd = (it.w/2)*s + (it.d/2)*c;
+    return {x0: it.x-hw, x1: it.x+hw, y0: it.y-hd, y1: it.y+hd, hw:hw, hd:hd};
+  }
+
+  function overlaps(a, b, shrink){
+    var sa = shrink || 0;
+    var A = corners(a, -sa, -sa), B = corners(b, -sa, -sa);
+    var polys = [A, B];
+    for(var p=0;p<2;p++){
+      var poly = polys[p];
+      for(var i=0;i<4;i++){
+        var j = (i+1)%4;
+        var nx = -(poly[j].y - poly[i].y), ny = poly[j].x - poly[i].x;
+        var a0=Infinity,a1=-Infinity,b0=Infinity,b1=-Infinity, k, v;
+        for(k=0;k<4;k++){ v = A[k].x*nx + A[k].y*ny; if(v<a0)a0=v; if(v>a1)a1=v; }
+        for(k=0;k<4;k++){ v = B[k].x*nx + B[k].y*ny; if(v<b0)b0=v; if(v>b1)b1=v; }
+        if(a1 <= b0 || b1 <= a0) return false;
+      }
+    }
+    return true;
+  }
+
+  function insideRoom(it){
+    var pts = corners(it), eps = 1;
+    for(var i=0;i<4;i++){
+      if(pts[i].x < -eps || pts[i].x > state.room.w+eps) return false;
+      if(pts[i].y < -eps || pts[i].y > state.room.d+eps) return false;
+    }
+    return true;
+  }
+
+  // 高さ方向に重なるか（窓など浮いている物は床置きと干渉しない）
+  function vOverlap(a, b){
+    var a0 = a.z||0, a1 = a0 + a.h, b0 = b.z||0, b1 = b0 + b.h;
+    return a1 > b0 + 1 && b1 > a0 + 1;
+  }
+
+  function analyze(){
+    var res = {hard:[], soft:[], clash:{}, occ:0};
+    var items = state.items, i, j;
+    for(i=0;i<items.length;i++){
+      var a = items[i];
+      res.occ += (a.w * a.d) / 1e6;
+      if(!insideRoom(a)){ res.hard.push(a.name + " が部屋からはみ出しています"); res.clash[a.id] = true; }
+      for(j=i+1;j<items.length;j++){
+        var b = items[j];
+        if(!vOverlap(a,b)) continue;
+        if(overlaps(a,b,2)){
+          res.hard.push(a.name + " と " + b.name + " が重なっています");
+          res.clash[a.id] = true; res.clash[b.id] = true;
+        }
+      }
+    }
+    if(state.showClear){
+      for(i=0;i<items.length;i++){
+        var cr = clearRect(items[i]);
+        if(!cr) continue;
+        var zone = {x:cr.x, y:cr.y, w:cr.w, d:cr.d, rot:cr.rot};
+        for(j=0;j<items.length;j++){
+          if(i===j) continue;
+          var o = items[j];
+          if(o.soft) continue; // 椅子など動かせる物は使用スペースに入ってよい
+          if((o.z||0) >= (items[i].h||0)) continue;
+          if(overlaps(zone, o, 2)){
+            res.soft.push(items[i].name + " の使用スペースに " + o.name + " が掛かっています");
+            break;
+          }
+        }
+      }
+    }
+    return res;
+  }
+
+  /* ---------- 共通ユーティリティ ---------- */
+
+  function clamp(v,a,b){ return v<a?a:(v>b?b:v); }
+  function fmt(n){ return Math.round(n).toLocaleString("ja-JP"); }
+  function css(name){ return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); }
+
+  function snapValue(v){ return state.snap ? Math.round(v/50)*50 : Math.round(v); }
+
+  function snapToWalls(it){
+    if(!state.snap) return;
+    var bb = bbox(it), t = 90;
+    if(bb.x0 < t) it.x = bb.hw;
+    if(state.room.w - bb.x1 < t) it.x = state.room.w - bb.hw;
+    if(bb.y0 < t) it.y = bb.hd;
+    if(state.room.d - bb.y1 < t) it.y = state.room.d - bb.hd;
+  }
+
+  function selected(){
+    if(!state.selected) return null;
+    for(var i=0;i<state.items.length;i++) if(state.items[i].id === state.selected) return state.items[i];
+    return null;
+  }
+
+  function touch(){ state.isSample = false; }
+
+  /* ---------- 3Dビュー ---------- */
+
+  var three = {ready:false, needs:true};
+
+  function initThree(){
+    if(typeof THREE === "undefined") return false;
+    var canvas = el.three;
+    three.renderer = new THREE.WebGLRenderer({canvas:canvas, antialias:true});
+    three.renderer.setPixelRatio(Math.min(window.devicePixelRatio||1, 2));
+    three.renderer.shadowMap.enabled = true;
+    three.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+
+    three.scene = new THREE.Scene();
+    three.camera = new THREE.PerspectiveCamera(42, 1, 0.05, 200);
+
+    three.orbit = {az: -0.9, pol: 1.02, dist: 8};
+
+    three.hemi = new THREE.HemisphereLight(0xffffff, 0x8899aa, 0.85);
+    three.scene.add(three.hemi);
+    three.sun = new THREE.DirectionalLight(0xffffff, 0.75);
+    three.sun.castShadow = true;
+    three.sun.shadow.mapSize.set(1024,1024);
+    three.scene.add(three.sun);
+    three.scene.add(three.sun.target);
+
+    three.roomGroup = new THREE.Group();
+    three.itemGroup = new THREE.Group();
+    three.scene.add(three.roomGroup);
+    three.scene.add(three.itemGroup);
+
+    three.raycaster = new THREE.Raycaster();
+    three.floorPlane = new THREE.Plane(new THREE.Vector3(0,1,0), 0);
+
+    three.ready = true;
+    buildRoom();
+    syncItems();
+    applySceneTheme();
+    resize();
+    loop();
+    return true;
+  }
+
+  function disposeGroup(g){
+    for(var i=g.children.length-1;i>=0;i--){
+      var o = g.children[i];
+      o.traverse(function(n){
+        if(n.geometry) n.geometry.dispose();
+        if(n.material){ if(Array.isArray(n.material)) n.material.forEach(function(m){m.dispose();}); else n.material.dispose(); }
+      });
+      g.remove(o);
+    }
+  }
+
+  function buildRoom(){
+    if(!three.ready) return;
+    disposeGroup(three.roomGroup);
+    var W = state.room.w/1000, D = state.room.d/1000, H = state.room.h/1000;
+
+    var floorMat = new THREE.MeshStandardMaterial({color:new THREE.Color(css("--scene-floor")||"#cfd8e2"), roughness:.95, metalness:0});
+    var floor = new THREE.Mesh(new THREE.PlaneGeometry(W, D), floorMat);
+    floor.rotation.x = -Math.PI/2;
+    floor.position.set(W/2, 0, D/2);
+    floor.receiveShadow = true;
+    three.roomGroup.add(floor);
+
+    // 500mm グリッド
+    var gpts = [], step = 0.5, x, z;
+    for(x=0;x<=W+1e-6;x+=step){ gpts.push(Math.min(x,W),0.002,0, Math.min(x,W),0.002,D); }
+    for(z=0;z<=D+1e-6;z+=step){ gpts.push(0,0.002,Math.min(z,D), W,0.002,Math.min(z,D)); }
+    var gg = new THREE.BufferGeometry();
+    gg.setAttribute("position", new THREE.Float32BufferAttribute(gpts, 3));
+    three.grid = new THREE.LineSegments(gg, new THREE.LineBasicMaterial({color:new THREE.Color(css("--scene-line")||"#9fb0c1"), transparent:true, opacity:.45}));
+    three.roomGroup.add(three.grid);
+
+    var wallMat = new THREE.MeshStandardMaterial({color:new THREE.Color(css("--scene-wall")||"#eef2f7"), roughness:1, metalness:0, side:THREE.DoubleSide});
+    three.walls = [];
+    var defs = [
+      {w:W, pos:[W/2, H/2, 0], rot:0, n:[0,0,-1]},
+      {w:W, pos:[W/2, H/2, D], rot:Math.PI, n:[0,0,1]},
+      {w:D, pos:[0, H/2, D/2], rot:-Math.PI/2, n:[-1,0,0]},
+      {w:D, pos:[W, H/2, D/2], rot:Math.PI/2, n:[1,0,0]}
+    ];
+    defs.forEach(function(def){
+      var m = new THREE.Mesh(new THREE.PlaneGeometry(def.w, H), wallMat);
+      m.position.set(def.pos[0], def.pos[1], def.pos[2]);
+      m.rotation.y = def.rot;
+      m.receiveShadow = true;
+      m.userData.normal = new THREE.Vector3(def.n[0], def.n[1], def.n[2]);
+      three.walls.push(m);
+      three.roomGroup.add(m);
+      var eg = new THREE.LineSegments(new THREE.EdgesGeometry(m.geometry), new THREE.LineBasicMaterial({color:new THREE.Color(css("--scene-line")||"#9fb0c1")}));
+      eg.position.copy(m.position); eg.rotation.y = def.rot;
+      m.userData.edge = eg;
+      three.roomGroup.add(eg);
+    });
+
+    three.orbit.target = new THREE.Vector3(W/2, H*0.35, D/2);
+    var span = Math.max(W, D, H);
+    three.orbit.dist = Math.min(Math.max(span*1.9, 3), 24);
+
+    three.sun.position.set(W*0.4, H*3, -D*0.5);
+    three.sun.target.position.set(W/2, 0, D/2);
+    var sc = three.sun.shadow.camera;
+    var ext = Math.max(W, D) * 1.1;
+    sc.left = -ext; sc.right = ext; sc.top = ext; sc.bottom = -ext; sc.near = .5; sc.far = H*6 + ext*2;
+    sc.updateProjectionMatrix();
+
+    three.needs = true;
+  }
+
+  function syncItems(){
+    if(!three.ready) return;
+    disposeGroup(three.itemGroup);
+    three.pickables = [];
+    var res = analyze();
+    state.items.forEach(function(it){
+      var w = it.w/1000, d = it.d/1000, h = Math.max(it.h,20)/1000, z = (it.z||0)/1000;
+      var isSel = it.id === state.selected;
+      var col = new THREE.Color(res.clash[it.id] ? (css("--bad")||"#bb3c2e") : it.color);
+      var mat = new THREE.MeshStandardMaterial({color:col, roughness:.72, metalness:.02});
+      var mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
+      mesh.position.set(it.x/1000, z + h/2, it.y/1000);
+      mesh.rotation.y = -rad(it);
+      mesh.castShadow = true; mesh.receiveShadow = true;
+      mesh.userData.id = it.id;
+      three.itemGroup.add(mesh);
+      three.pickables.push(mesh);
+
+      var edge = new THREE.LineSegments(
+        new THREE.EdgesGeometry(mesh.geometry),
+        new THREE.LineBasicMaterial({color:new THREE.Color(isSel ? (css("--accent")||"#1c6fb0") : "#0d151d"), transparent:true, opacity: isSel ? 1 : .35, linewidth:1})
+      );
+      edge.position.copy(mesh.position); edge.rotation.y = mesh.rotation.y;
+      if(isSel) edge.scale.set(1.012,1.012,1.012);
+      three.itemGroup.add(edge);
+
+      if(state.showClear && it.clear > 0){
+        var cr = clearRect(it);
+        var zoneMat = new THREE.MeshBasicMaterial({color:new THREE.Color(css("--accent")||"#1c6fb0"), transparent:true, opacity:.14, side:THREE.DoubleSide, depthWrite:false});
+        var zone = new THREE.Mesh(new THREE.PlaneGeometry(cr.w/1000, cr.d/1000), zoneMat);
+        zone.rotation.x = -Math.PI/2;
+        zone.rotation.z = rad(it);
+        zone.position.set(cr.x/1000, 0.004, cr.y/1000);
+        three.itemGroup.add(zone);
+      }
+    });
+    three.needs = true;
+  }
+
+  function applySceneTheme(){
+    if(!three.ready) return;
+    three.scene.background = new THREE.Color(css("--scene-bg")||"#dde4ec");
+    buildRoom();
+    syncItems();
+  }
+
+  function updateCamera(){
+    var o = three.orbit;
+    if(!o.target) return;
+    o.pol = clamp(o.pol, 0.12, Math.PI/2 - 0.02);
+    var x = o.target.x + o.dist * Math.sin(o.pol) * Math.sin(o.az);
+    var y = o.target.y + o.dist * Math.cos(o.pol);
+    var z = o.target.z + o.dist * Math.sin(o.pol) * Math.cos(o.az);
+    three.camera.position.set(x, y, z);
+    three.camera.lookAt(o.target);
+
+    if(three.walls){
+      var dir = new THREE.Vector3().subVectors(three.camera.position, o.target);
+      three.walls.forEach(function(wm){
+        var hidden = wm.userData.normal.dot(dir) > 0;
+        wm.visible = !hidden;
+        if(wm.userData.edge) wm.userData.edge.visible = !hidden;
+      });
+    }
+  }
+
+  function loop(){
+    requestAnimationFrame(loop);
+    if(!three.ready || state.view !== "3d" || !three.needs) return;
+    three.needs = false;
+    updateCamera();
+    three.renderer.render(three.scene, three.camera);
+  }
+
+  /* ---------- 3D 操作 ---------- */
+
+  var drag = null;
+
+  function pointerNDC(e, rect){
+    return new THREE.Vector2(
+      ((e.clientX - rect.left) / rect.width) * 2 - 1,
+      -((e.clientY - rect.top) / rect.height) * 2 + 1
+    );
+  }
+
+  function floorPoint(e, rect){
+    var ndc = pointerNDC(e, rect);
+    three.raycaster.setFromCamera(ndc, three.camera);
+    var p = new THREE.Vector3();
+    if(!three.raycaster.ray.intersectPlane(three.floorPlane, p)) return null;
+    return {x: p.x*1000, y: p.z*1000};
+  }
+
+  el.three.addEventListener("pointerdown", function(e){
+    if(!three.ready || state.view !== "3d") return;
+    el.three.setPointerCapture(e.pointerId);
+    var rect = el.three.getBoundingClientRect();
+    var ndc = pointerNDC(e, rect);
+    three.raycaster.setFromCamera(ndc, three.camera);
+    var hits = three.raycaster.intersectObjects(three.pickables || [], false);
+    if(hits.length && e.button === 0){
+      var id = hits[0].object.userData.id;
+      select(id);
+      var it = selected();
+      var fp = floorPoint(e, rect);
+      if(it && fp) drag = {mode:"item", id:id, dx: it.x - fp.x, dy: it.y - fp.y};
+    } else {
+      drag = {mode:"orbit", x:e.clientX, y:e.clientY};
+      if(e.button === 0 && !hits.length) select(null);
+    }
+  });
+
+  el.three.addEventListener("pointermove", function(e){
+    if(!drag || !three.ready) return;
+    if(drag.mode === "orbit"){
+      three.orbit.az -= (e.clientX - drag.x) * 0.008;
+      three.orbit.pol -= (e.clientY - drag.y) * 0.006;
+      drag.x = e.clientX; drag.y = e.clientY;
+      three.needs = true;
+    } else {
+      var rect = el.three.getBoundingClientRect();
+      var fp = floorPoint(e, rect);
+      if(!fp) return;
+      var it = selected();
+      if(!it) return;
+      it.x = snapValue(fp.x + drag.dx);
+      it.y = snapValue(fp.y + drag.dy);
+      snapToWalls(it);
+      touch();
+      syncItems(); renderInspector(); renderStats(); renderList();
+      scheduleSave();
+    }
+  });
+
+  function endDrag(e){
+    if(drag && el.three.hasPointerCapture && el.three.hasPointerCapture(e.pointerId)) el.three.releasePointerCapture(e.pointerId);
+    drag = null;
+  }
+  el.three.addEventListener("pointerup", endDrag);
+  el.three.addEventListener("pointercancel", endDrag);
+
+  el.three.addEventListener("wheel", function(e){
+    if(state.view !== "3d" || !three.ready) return;
+    e.preventDefault();
+    three.orbit.dist = clamp(three.orbit.dist * (1 + Math.sign(e.deltaY)*0.09), 1.2, 40);
+    three.needs = true;
+  }, {passive:false});
+
+  /* ---------- 平面図 ---------- */
+
+  var planView = {scale:1, ox:0, oy:0};
+
+  function planResize(){
+    var c = el.plan, r = el.stage.getBoundingClientRect();
+    var dpr = Math.min(window.devicePixelRatio||1, 2);
+    c.width = Math.max(1, Math.round(r.width * dpr));
+    c.height = Math.max(1, Math.round(r.height * dpr));
+    c.style.width = r.width + "px";
+    c.style.height = r.height + "px";
+    drawPlan();
+  }
+
+  function drawPlan(){
+    var c = el.plan;
+    if(c.hidden) return;
+    var ctx = c.getContext("2d");
+    var dpr = Math.min(window.devicePixelRatio||1, 2);
+    ctx.save();
+    ctx.scale(dpr, dpr);
+    var W = c.width/dpr, H = c.height/dpr;
+    ctx.clearRect(0,0,W,H);
+    ctx.fillStyle = css("--scene-bg")||"#dde4ec";
+    ctx.fillRect(0,0,W,H);
+
+    var padL = 56, padT = 44, padR = 24, padB = 28;
+    var rw = state.room.w, rd = state.room.d;
+    var scale = Math.min((W - padL - padR)/rw, (H - padT - padB)/rd);
+    var ox = padL + ((W - padL - padR) - rw*scale)/2;
+    var oy = padT + ((H - padT - padB) - rd*scale)/2;
+    planView = {scale:scale, ox:ox, oy:oy};
+
+    function X(mm){ return ox + mm*scale; }
+    function Y(mm){ return oy + mm*scale; }
+
+    var ink = css("--ink")||"#15202c", ink2 = css("--ink-2")||"#4b5c6d", ink3 = css("--ink-3")||"#7b8c9c";
+    var line = css("--scene-line")||"#9fb0c1", accent = css("--accent")||"#1c6fb0", bad = css("--bad")||"#bb3c2e";
+
+    // 床
+    ctx.fillStyle = css("--scene-floor")||"#cfd8e2";
+    ctx.fillRect(X(0), Y(0), rw*scale, rd*scale);
+
+    // グリッド 500mm
+    ctx.strokeStyle = line; ctx.globalAlpha = .35; ctx.lineWidth = 1;
+    ctx.beginPath();
+    for(var gx=500; gx<rw; gx+=500){ ctx.moveTo(X(gx), Y(0)); ctx.lineTo(X(gx), Y(rd)); }
+    for(var gy=500; gy<rd; gy+=500){ ctx.moveTo(X(0), Y(gy)); ctx.lineTo(X(rw), Y(gy)); }
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+
+    // 壁
+    ctx.strokeStyle = ink; ctx.lineWidth = 3;
+    ctx.strokeRect(X(0), Y(0), rw*scale, rd*scale);
+
+    var res = analyze();
+
+    // 使用スペース
+    if(state.showClear){
+      state.items.forEach(function(it){
+        var cr = clearRect(it);
+        if(!cr) return;
+        ctx.save();
+        ctx.translate(X(cr.x), Y(cr.y));
+        ctx.rotate(rad(it));
+        ctx.fillStyle = accent; ctx.globalAlpha = .13;
+        ctx.fillRect(-cr.w*scale/2, -cr.d*scale/2, cr.w*scale, cr.d*scale);
+        ctx.globalAlpha = .5; ctx.strokeStyle = accent; ctx.lineWidth = 1; ctx.setLineDash([3,3]);
+        ctx.strokeRect(-cr.w*scale/2, -cr.d*scale/2, cr.w*scale, cr.d*scale);
+        ctx.setLineDash([]); ctx.globalAlpha = 1;
+        ctx.restore();
+      });
+    }
+
+    // 家具
+    state.items.forEach(function(it){
+      var isSel = it.id === state.selected, clash = !!res.clash[it.id];
+      var w = it.w*scale, d = it.d*scale;
+      ctx.save();
+      ctx.translate(X(it.x), Y(it.y));
+      ctx.rotate(rad(it));
+      ctx.fillStyle = it.color;
+      ctx.globalAlpha = (it.z||0) > 0 ? .45 : .82;
+      ctx.fillRect(-w/2, -d/2, w, d);
+      ctx.globalAlpha = 1;
+      ctx.lineWidth = isSel ? 2.5 : 1.2;
+      ctx.strokeStyle = clash ? bad : (isSel ? accent : ink);
+      if((it.z||0) > 0) ctx.setLineDash([5,3]);
+      ctx.strokeRect(-w/2, -d/2, w, d);
+      ctx.setLineDash([]);
+      // 正面マーク
+      ctx.strokeStyle = clash ? bad : (isSel ? accent : ink2);
+      ctx.globalAlpha = .7; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(-w/2, d/2); ctx.lineTo(0, d/2 - Math.min(d*0.28, 10)); ctx.lineTo(w/2, d/2); ctx.stroke();
+      ctx.globalAlpha = 1;
+      ctx.restore();
+    });
+
+    // 名前と寸法は常に水平に（回転しても読めるように）
+    ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    state.items.forEach(function(it){
+      var bb = bbox(it);
+      var pw = (bb.x1 - bb.x0) * scale, ph = (bb.y1 - bb.y0) * scale;
+      if(pw < 52 || ph < 28) return;
+      ctx.fillStyle = "#0d151d";
+      ctx.globalAlpha = .88;
+      ctx.font = '500 11px "Zen Kaku Gothic New", system-ui, sans-serif';
+      ctx.fillText(it.name, X(it.x), Y(it.y) - 5);
+      ctx.font = '400 9px "JetBrains Mono", monospace';
+      ctx.globalAlpha = .6;
+      ctx.fillText(it.w + "×" + it.d, X(it.x), Y(it.y) + 7);
+      ctx.globalAlpha = 1;
+    });
+
+    // 全体寸法線
+    ctx.strokeStyle = ink2; ctx.fillStyle = ink2; ctx.lineWidth = 1;
+    ctx.font = '500 11px "JetBrains Mono", monospace';
+    ctx.textAlign = "center"; ctx.textBaseline = "alphabetic";
+    dimH(ctx, X(0), X(rw), oy - 20, fmt(rw), ink2);
+    dimV(ctx, Y(0), Y(rd), ox - 26, fmt(rd), ink2);
+
+    // 選択家具の離れ寸法
+    var sel = selected();
+    if(sel){
+      var bb = bbox(sel);
+      ctx.strokeStyle = accent; ctx.fillStyle = accent;
+      ctx.setLineDash([4,3]);
+      var midY = Y((bb.y0+bb.y1)/2), midX = X((bb.x0+bb.x1)/2);
+      if(bb.x0 > 1) dimH(ctx, X(0), X(bb.x0), midY, fmt(bb.x0), accent);
+      if(rw - bb.x1 > 1) dimH(ctx, X(bb.x1), X(rw), midY, fmt(rw-bb.x1), accent);
+      if(bb.y0 > 1) dimV(ctx, Y(0), Y(bb.y0), midX, fmt(bb.y0), accent);
+      if(rd - bb.y1 > 1) dimV(ctx, Y(bb.y1), Y(rd), midX, fmt(rd-bb.y1), accent);
+      ctx.setLineDash([]);
+    }
+
+    ctx.restore();
+  }
+
+  function dimH(ctx, x0, x1, y, label, color){
+    if(x1 - x0 < 4) return;
+    ctx.save();
+    ctx.strokeStyle = color; ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.moveTo(x0, y-4); ctx.lineTo(x0, y+4);
+    ctx.moveTo(x1, y-4); ctx.lineTo(x1, y+4);
+    ctx.moveTo(x0, y); ctx.lineTo(x1, y);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.font = '500 10px "JetBrains Mono", monospace';
+    ctx.textAlign = "center";
+    var tw = ctx.measureText(label).width;
+    if(x1 - x0 > tw + 8){
+      ctx.fillStyle = css("--scene-bg")||"#dde4ec";
+      ctx.fillRect((x0+x1)/2 - tw/2 - 3, y - 7, tw + 6, 12);
+      ctx.fillStyle = color;
+      ctx.fillText(label, (x0+x1)/2, y + 3);
+    }
+    ctx.restore();
+  }
+
+  function dimV(ctx, y0, y1, x, label, color){
+    if(y1 - y0 < 4) return;
+    ctx.save();
+    ctx.strokeStyle = color; ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.moveTo(x-4, y0); ctx.lineTo(x+4, y0);
+    ctx.moveTo(x-4, y1); ctx.lineTo(x+4, y1);
+    ctx.moveTo(x, y0); ctx.lineTo(x, y1);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.font = '500 10px "JetBrains Mono", monospace';
+    ctx.textAlign = "center";
+    var tw = ctx.measureText(label).width;
+    if(y1 - y0 > tw + 8){
+      ctx.translate(x, (y0+y1)/2);
+      ctx.rotate(-Math.PI/2);
+      ctx.fillStyle = css("--scene-bg")||"#dde4ec";
+      ctx.fillRect(-tw/2 - 3, -7, tw + 6, 12);
+      ctx.fillStyle = color;
+      ctx.fillText(label, 0, 3);
+    }
+    ctx.restore();
+  }
+
+  function planHit(mx, my){
+    var pt = {x:(mx - planView.ox)/planView.scale, y:(my - planView.oy)/planView.scale};
+    for(var i=state.items.length-1;i>=0;i--){
+      var it = state.items[i];
+      var probe = {x:pt.x, y:pt.y, w:1, d:1, rot:0};
+      if(overlaps(probe, it, 0)) return {item:it, pt:pt};
+    }
+    return {item:null, pt:pt};
+  }
+
+  var planDrag = null;
+  el.plan.addEventListener("pointerdown", function(e){
+    var r = el.plan.getBoundingClientRect();
+    var hit = planHit(e.clientX - r.left, e.clientY - r.top);
+    if(hit.item){
+      select(hit.item.id);
+      el.plan.setPointerCapture(e.pointerId);
+      planDrag = {id:hit.item.id, dx:hit.item.x - hit.pt.x, dy:hit.item.y - hit.pt.y};
+    } else {
+      select(null);
+    }
+  });
+  el.plan.addEventListener("pointermove", function(e){
+    if(!planDrag) return;
+    var r = el.plan.getBoundingClientRect();
+    var pt = {x:(e.clientX - r.left - planView.ox)/planView.scale, y:(e.clientY - r.top - planView.oy)/planView.scale};
+    var it = selected();
+    if(!it) return;
+    it.x = snapValue(pt.x + planDrag.dx);
+    it.y = snapValue(pt.y + planDrag.dy);
+    snapToWalls(it);
+    touch();
+    drawPlan(); renderInspector(); renderStats(); renderList();
+    scheduleSave();
+  });
+  function endPlanDrag(e){
+    if(planDrag && el.plan.hasPointerCapture && el.plan.hasPointerCapture(e.pointerId)) el.plan.releasePointerCapture(e.pointerId);
+    planDrag = null;
+  }
+  el.plan.addEventListener("pointerup", endPlanDrag);
+  el.plan.addEventListener("pointercancel", endPlanDrag);
+
+  /* ---------- UI 描画 ---------- */
+
+  function setView(v){
+    state.view = v;
+    el.btn3d.setAttribute("aria-pressed", v === "3d" ? "true" : "false");
+    el.btnplan.setAttribute("aria-pressed", v === "plan" ? "true" : "false");
+    el.three.hidden = v !== "3d";
+    el.plan.hidden = v !== "plan";
+    el.hint.textContent = v === "3d"
+      ? "ドラッグで視点回転／家具をつかんで移動／ホイールでズーム"
+      : "家具をドラッグで移動／選択すると壁からの寸法を表示";
+    if(v === "3d"){ three.needs = true; resize(); } else { planResize(); }
+  }
+
+  function select(id){
+    state.selected = id;
+    syncItems(); drawPlan(); renderInspector(); renderList();
+  }
+
+  function renderRoomFields(){
+    el.roomw.value = state.room.w;
+    el.roomd.value = state.room.d;
+    el.roomh.value = state.room.h;
+    var m2 = state.room.w * state.room.d / 1e6;
+    el.roomarea.textContent = m2.toFixed(2) + " ㎡（約 " + (m2/1.62).toFixed(1) + " 畳）";
+    var match = "custom";
+    ROOM_PRESETS.forEach(function(p, i){ if(p.w === state.room.w && p.d === state.room.d) match = String(i); });
+    el.roompreset.value = match;
+  }
+
+  function renderPresets(){
+    el.presets.innerHTML = "";
+    ITEM_PRESETS.forEach(function(p){
+      var b = document.createElement("button");
+      b.type = "button"; b.className = "preset";
+      var sw = document.createElement("span"); sw.className = "sw"; sw.style.background = COLORS[p.c];
+      var nm = document.createElement("b"); nm.textContent = p.name;
+      var dm = document.createElement("small"); dm.textContent = p.w + "×" + p.d + "×" + p.h;
+      b.appendChild(sw); b.appendChild(nm); b.appendChild(dm);
+      b.addEventListener("click", function(){ addItem(p); });
+      el.presets.appendChild(b);
+    });
+  }
+
+  function addItem(p){
+    var it = {
+      id: uid(), name: p.name, w: p.w, d: p.d, h: p.h,
+      clear: p.clear || 0, z: p.z || 0, rot: 0, soft: !!p.soft,
+      x: clamp(state.room.w/2, p.w/2, state.room.w - p.w/2),
+      y: clamp(state.room.d/2, p.d/2, state.room.d - p.d/2),
+      color: COLORS[p.c != null ? p.c : (state.items.length % COLORS.length)]
+    };
+    // 空いている場所を軽く探す
+    var tries = 0;
+    while(tries < 40){
+      var hit = false;
+      for(var i=0;i<state.items.length;i++){
+        if(vOverlap(it, state.items[i]) && overlaps(it, state.items[i], 2)){ hit = true; break; }
+      }
+      if(!hit) break;
+      it.x += 120; it.y += 90;
+      if(it.x > state.room.w - it.w/2){ it.x = it.w/2 + 60; }
+      if(it.y > state.room.d - it.d/2){ it.y = it.d/2 + 60; }
+      tries++;
+    }
+    state.items.push(it);
+    touch();
+    state.selected = it.id;
+    renderAll();
+    scheduleSave();
+  }
+
+  function renderInspector(){
+    var it = selected();
+    var box = el.inspector;
+    box.innerHTML = "";
+    if(!it){
+      var p = document.createElement("p");
+      p.className = "empty";
+      p.textContent = "家具をクリックすると寸法と位置を編集できます。";
+      box.appendChild(p);
+      return;
+    }
+    var frag = document.createDocumentFragment();
+
+    var r0 = row();
+    r0.appendChild(field("名前", "text", it.name, function(v){ it.name = v; touch(); renderList(); drawPlan(); scheduleSave(); }, {flex:"1 1 100%"}));
+    frag.appendChild(r0);
+
+    var r1 = row();
+    r1.appendChild(numField("幅 W", it.w, 50, 6000, 10, function(v){ it.w = v; after(); }));
+    r1.appendChild(numField("奥行 D", it.d, 50, 6000, 10, function(v){ it.d = v; after(); }));
+    r1.appendChild(numField("高さ H", it.h, 20, 3000, 10, function(v){ it.h = v; after(); }));
+    frag.appendChild(r1);
+
+    var r2 = row();
+    r2.appendChild(numField("位置 X", Math.round(it.x), -2000, 20000, 10, function(v){ it.x = v; after(); }));
+    r2.appendChild(numField("位置 Y", Math.round(it.y), -2000, 20000, 10, function(v){ it.y = v; after(); }));
+    r2.appendChild(numField("回転 °", it.rot, -360, 360, 15, function(v){ it.rot = ((v % 360) + 360) % 360; after(); }));
+    frag.appendChild(r2);
+
+    var r3 = row();
+    r3.appendChild(numField("使用スペース", it.clear, 0, 2000, 50, function(v){ it.clear = v; after(); }));
+    r3.appendChild(numField("床からの高さ", it.z || 0, 0, 3000, 10, function(v){ it.z = v; after(); }));
+    frag.appendChild(r3);
+
+    var r4 = row();
+    r4.style.marginTop = "8px";
+    r4.appendChild(btn("90°回す", function(){ it.rot = (it.rot + 90) % 360; after(); }));
+    r4.appendChild(btn("複製", function(){
+      var cp = Object.assign({}, it, {id: uid(), x: clamp(it.x + 200, 0, state.room.w), y: clamp(it.y + 200, 0, state.room.d)});
+      state.items.push(cp); state.selected = cp.id; touch(); renderAll(); scheduleSave();
+    }));
+    var del = btn("削除", function(){
+      state.items = state.items.filter(function(o){ return o.id !== it.id; });
+      state.selected = null; touch(); renderAll(); scheduleSave();
+    });
+    del.className = "btn danger";
+    r4.appendChild(del);
+    frag.appendChild(r4);
+
+    var lab = document.createElement("div");
+    lab.style.cssText = "font-size:10px;letter-spacing:.08em;color:var(--ink-3);margin-top:10px";
+    lab.textContent = "壁に寄せる";
+    frag.appendChild(lab);
+    var r5 = row();
+    r5.appendChild(btn("← 左", function(){ it.x = bbox(it).hw; after(); }));
+    r5.appendChild(btn("↑ 上", function(){ it.y = bbox(it).hd; after(); }));
+    r5.appendChild(btn("→ 右", function(){ it.x = state.room.w - bbox(it).hw; after(); }));
+    r5.appendChild(btn("↓ 下", function(){ it.y = state.room.d - bbox(it).hd; after(); }));
+    frag.appendChild(r5);
+
+    box.appendChild(frag);
+
+    function after(){
+      touch();
+      renderAll();
+      scheduleSave();
+    }
+  }
+
+  function row(){ var d = document.createElement("div"); d.className = "row"; d.style.marginTop = "8px"; return d; }
+
+  function field(label, type, value, onchange, style){
+    var f = document.createElement("div"); f.className = "field";
+    if(style && style.flex) f.style.flex = style.flex;
+    var l = document.createElement("label"); l.textContent = label;
+    var id = "f" + Math.random().toString(36).slice(2,8);
+    l.setAttribute("for", id);
+    var i = document.createElement("input"); i.type = type; i.id = id; i.value = value;
+    i.addEventListener("change", function(){ onchange(i.value); });
+    f.appendChild(l); f.appendChild(i);
+    return f;
+  }
+
+  function numField(label, value, min, max, step, onchange){
+    var f = field(label, "number", value, function(v){
+      var n = parseFloat(v);
+      if(isNaN(n)) return;
+      onchange(clamp(Math.round(n), min, max));
+    });
+    var i = f.querySelector("input");
+    i.min = min; i.max = max; i.step = step;
+    return f;
+  }
+
+  function btn(text, onclick){
+    var b = document.createElement("button");
+    b.type = "button"; b.className = "btn"; b.textContent = text;
+    b.addEventListener("click", onclick);
+    return b;
+  }
+
+  function renderList(){
+    var res = analyze();
+    el.itemlist.innerHTML = "";
+    if(!state.items.length){
+      var li = document.createElement("li");
+      li.style.cssText = "background:none;color:var(--ink-3);font-size:12px";
+      li.textContent = "まだ家具がありません。上のボタンから追加してください。";
+      el.itemlist.appendChild(li);
+      return;
+    }
+    state.items.forEach(function(it){
+      var li = document.createElement("li");
+      li.setAttribute("aria-selected", it.id === state.selected ? "true" : "false");
+      var sw = document.createElement("span"); sw.className = "swatch"; sw.style.background = it.color;
+      var nm = document.createElement("span"); nm.className = "nm"; nm.textContent = it.name;
+      var dim = document.createElement("span"); dim.className = "dim";
+      dim.textContent = it.w + "×" + it.d + (it.rot ? " / " + it.rot + "°" : "");
+      li.appendChild(sw); li.appendChild(nm);
+      if(res.clash[it.id]){ var fl = document.createElement("span"); fl.className = "flag"; fl.textContent = "干渉"; li.appendChild(fl); }
+      li.appendChild(dim);
+      li.addEventListener("click", function(){ select(it.id); });
+      el.itemlist.appendChild(li);
+    });
+  }
+
+  function renderStats(){
+    var res = analyze();
+    var area = state.room.w * state.room.d / 1e6;
+    var occ = res.occ;
+    var free = Math.max(area - occ, 0);
+    var rate = area > 0 ? (occ / area * 100) : 0;
+    el["s-area"].innerHTML = area.toFixed(2) + '<small>㎡</small>';
+    el["s-occ"].innerHTML = occ.toFixed(2) + '<small>㎡</small>';
+    el["s-free"].innerHTML = free.toFixed(2) + '<small>㎡</small>';
+    el["s-rate"].innerHTML = rate.toFixed(0) + '<small>%</small>';
+    el["s-meter"].style.width = clamp(rate, 0, 100) + "%";
+    el["s-meter"].style.background = rate > 45 ? css("--warn") : css("--accent");
+
+    el.warnlist.innerHTML = "";
+    res.hard.forEach(function(t){
+      var li = document.createElement("li"); li.textContent = t; el.warnlist.appendChild(li);
+    });
+    res.soft.forEach(function(t){
+      var li = document.createElement("li"); li.className = "soft"; li.textContent = t; el.warnlist.appendChild(li);
+    });
+    if(!res.hard.length && !res.soft.length){
+      var ok = document.createElement("li");
+      ok.className = "soft";
+      ok.style.borderLeftColor = css("--ok");
+      ok.style.background = "transparent";
+      ok.textContent = "干渉なし。使用スペースも確保できています。";
+      el.warnlist.appendChild(ok);
+    }
+
+    // HUD
+    el.hud.innerHTML = "";
+    chip("部屋", state.room.w + " × " + state.room.d + " × H" + state.room.h);
+    chip("空き床", free.toFixed(2) + " ㎡");
+    chip("占有率", rate.toFixed(0) + " %");
+    if(res.hard.length) chip("干渉", res.hard.length + " 件", true);
+    if(state.isSample){
+      var s = document.createElement("div");
+      s.className = "chip";
+      s.innerHTML = '<span class="sample-flag">サンプル配置</span>';
+      el.hud.appendChild(s);
+    }
+  }
+
+  function chip(label, value, bad){
+    var d = document.createElement("div");
+    d.className = "chip" + (bad ? " bad" : "");
+    d.innerHTML = label + " <b></b>";
+    d.querySelector("b").textContent = value;
+    el.hud.appendChild(d);
+  }
+
+  function renderAll(){
+    renderRoomFields();
+    renderInspector();
+    renderList();
+    renderStats();
+    syncItems();
+    drawPlan();
+  }
+
+  /* ---------- 入力ハンドラ ---------- */
+
+  ROOM_PRESETS.forEach(function(p, i){
+    var o = document.createElement("option");
+    o.value = String(i); o.textContent = p.label;
+    el.roompreset.appendChild(o);
+  });
+  el.roompreset.addEventListener("change", function(){
+    var p = ROOM_PRESETS[parseInt(el.roompreset.value, 10)];
+    if(!p || !p.w) return;
+    state.room.w = p.w; state.room.d = p.d;
+    touch(); buildRoom(); renderAll(); scheduleSave();
+  });
+
+  ["roomw","roomd","roomh"].forEach(function(key){
+    el[key].addEventListener("change", function(){
+      var v = parseInt(el[key].value, 10);
+      if(isNaN(v)) { renderRoomFields(); return; }
+      if(key === "roomw") state.room.w = clamp(v, 900, 12000);
+      if(key === "roomd") state.room.d = clamp(v, 900, 12000);
+      if(key === "roomh") state.room.h = clamp(v, 1800, 4000);
+      touch(); buildRoom(); renderAll(); scheduleSave();
+    });
+  });
+
+  el.addcustom.addEventListener("click", function(){
+    addItem({name:"新しい家具", w:800, d:400, h:700, clear:0, z:0, c:state.items.length % COLORS.length});
+  });
+
+  el.showclear.addEventListener("change", function(){ state.showClear = el.showclear.checked; renderAll(); });
+  el.snapon.addEventListener("change", function(){ state.snap = el.snapon.checked; });
+
+  el.btn3d.addEventListener("click", function(){ setView("3d"); });
+  el.btnplan.addEventListener("click", function(){ setView("plan"); });
+
+  document.addEventListener("keydown", function(e){
+    var t = e.target;
+    if(t && (t.tagName === "INPUT" || t.tagName === "SELECT" || t.tagName === "TEXTAREA")) return;
+    var it = selected();
+    if(!it) return;
+    var step = e.shiftKey ? 10 : 50;
+    if(e.key === "Delete" || e.key === "Backspace"){
+      state.items = state.items.filter(function(o){ return o.id !== it.id; });
+      state.selected = null; touch(); renderAll(); scheduleSave(); e.preventDefault();
+    } else if(e.key === "r" || e.key === "R"){
+      it.rot = (it.rot + 90) % 360; touch(); renderAll(); scheduleSave();
+    } else if(e.key === "ArrowLeft"){ it.x -= step; touch(); renderAll(); scheduleSave(); e.preventDefault(); }
+    else if(e.key === "ArrowRight"){ it.x += step; touch(); renderAll(); scheduleSave(); e.preventDefault(); }
+    else if(e.key === "ArrowUp"){ it.y -= step; touch(); renderAll(); scheduleSave(); e.preventDefault(); }
+    else if(e.key === "ArrowDown"){ it.y += step; touch(); renderAll(); scheduleSave(); e.preventDefault(); }
+  });
+
+  /* ---------- リサイズ・テーマ ---------- */
+
+  function resize(){
+    var r = el.stage.getBoundingClientRect();
+    if(three.ready && r.width > 0 && r.height > 0){
+      three.renderer.setSize(r.width, r.height, false);
+      three.camera.aspect = r.width / Math.max(r.height, 1);
+      three.camera.updateProjectionMatrix();
+      three.needs = true;
+    }
+    if(!el.plan.hidden) planResize();
+  }
+
+  if(window.ResizeObserver){
+    new ResizeObserver(function(){ resize(); }).observe(el.stage);
+  } else {
+    window.addEventListener("resize", resize);
+  }
+
+  var mq = window.matchMedia("(prefers-color-scheme: dark)");
+  if(mq.addEventListener) mq.addEventListener("change", function(){ applySceneTheme(); drawPlan(); });
+  new MutationObserver(function(){ applySceneTheme(); drawPlan(); })
+    .observe(document.documentElement, {attributes:true, attributeFilter:["data-theme"]});
+
+  /* ---------- 保存（localStorage + db capability） ---------- */
+
+  var LS_KEY = "room-layout-v1";
+  var db = null, saveTimer = null, saving = false, dirtyFlag = false;
+
+  function snapshot(){
+    return {
+      v: 1,
+      room: {w: state.room.w, d: state.room.d, h: state.room.h},
+      items: state.items.map(function(it){
+        return {id:it.id, name:it.name, w:it.w, d:it.d, h:it.h, clear:it.clear||0, z:it.z||0,
+                x:Math.round(it.x), y:Math.round(it.y), rot:it.rot||0, color:it.color, soft:!!it.soft};
+      }),
+      updatedAt: new Date().toISOString()
+    };
+  }
+
+  function applySnapshot(data){
+    if(!data || !data.room || !Array.isArray(data.items)) return false;
+    state.room = {w:data.room.w, d:data.room.d, h:data.room.h || 2400};
+    state.items = data.items.map(function(o){
+      return {id:o.id||uid(), name:o.name||"家具", w:o.w, d:o.d, h:o.h, clear:o.clear||0, z:o.z||0,
+              x:o.x, y:o.y, rot:o.rot||0, color:o.color||COLORS[0], soft:!!o.soft};
+    });
+    state.selected = null;
+    state.isSample = false;
+    buildRoom();
+    renderAll();
+    return true;
+  }
+
+  function saveLocal(){
+    try{ localStorage.setItem(LS_KEY, JSON.stringify(snapshot())); }catch(e){}
+  }
+
+  function loadLocal(){
+    try{
+      var raw = localStorage.getItem(LS_KEY);
+      if(!raw) return false;
+      return applySnapshot(JSON.parse(raw));
+    }catch(e){ return false; }
+  }
+
+  function setSaveState(cls, text){
+    el.savedot.className = "dot" + (cls ? " " + cls : "");
+    el.savetext.textContent = text;
+  }
+
+  function scheduleSave(){
+    saveLocal();
+    if(!db) return;
+    dirtyFlag = true;
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(flushSave, 700);
+  }
+
+  function flushSave(){
+    if(!db || saving || !dirtyFlag) return;
+    dirtyFlag = false; saving = true;
+    setSaveState("busy", "保存中…");
+    db.doc("state/current").set(snapshot()).then(function(){
+      saving = false;
+      setSaveState("on", "自動保存しました");
+      if(dirtyFlag) flushSave();
+    }).catch(function(err){
+      saving = false;
+      setSaveState("", "この端末に保存（同期不可）");
+      if(err && err.code === "revoked") db = null;
+    });
+  }
+
+  function renderPlans(plans){
+    el.planlist.innerHTML = "";
+    if(!plans || !plans.length){
+      el.plannote.textContent = db
+        ? "プランを保存すると、配置案を切り替えて見比べられます。"
+        : "この画面では端末内保存のみ有効です。プランの保存は公開版でご利用ください。";
+      return;
+    }
+    el.plannote.textContent = "読込を押すと、その配置に差し替わります。";
+    plans.forEach(function(p){
+      var li = document.createElement("li");
+      var nm = document.createElement("span"); nm.className = "nm"; nm.textContent = p.name || "無題のプラン";
+      var t = document.createElement("time");
+      t.textContent = (p.savedAt || "").slice(5,16).replace("T"," ");
+      var load = btn("読込", function(){ applySnapshot(p); scheduleSave(); });
+      load.style.padding = "3px 8px";
+      var del = btn("削除", function(){
+        if(!db) return;
+        db.doc("plans/" + p.id).delete().catch(function(){});
+      });
+      del.className = "btn danger"; del.style.padding = "3px 8px";
+      li.appendChild(nm); li.appendChild(t); li.appendChild(load); li.appendChild(del);
+      el.planlist.appendChild(li);
+    });
+  }
+
+  el.saveplan.addEventListener("click", function(){
+    if(!db){
+      el.plannote.textContent = "保存機能はまだ使えません（この表示では端末内保存のみ）。";
+      return;
+    }
+    var name = (el.planname.value || "").trim() || ("プラン " + new Date().toLocaleString("ja-JP", {month:"numeric", day:"numeric", hour:"2-digit", minute:"2-digit"}));
+    var id = "p" + Date.now().toString(36);
+    var body = snapshot();
+    body.name = name;
+    body.savedAt = new Date().toISOString();
+    db.doc("plans/" + id).set(body).then(function(){
+      el.planname.value = "";
+      el.plannote.textContent = "「" + name + "」を保存しました。";
+    }).catch(function(){
+      el.plannote.textContent = "保存できませんでした。時間をおいて試してください。";
+    });
+  });
+
+  /* ---------- 起動 ---------- */
+
+  renderPresets();
+  renderAll();
+  setSaveState("", "この端末に保存中");
+
+  if(!initThree()){
+    el.three.hidden = true;
+    setView("plan");
+    el.btn3d.disabled = true;
+    el.btn3d.title = "3D表示を読み込めませんでした";
+  }
+  planResize();
+
+  var hadLocal = loadLocal();
+  if(hadLocal) renderAll();
+
+  if(window.claude && typeof window.claude.use === "function"){
+    window.claude.use("db").then(function(d){
+      if(!d) return;
+      db = d;
+      setSaveState("on", "自動保存");
+      d.doc("state/current").get().then(function(snap){
+        if(snap.exists && state.isSample){
+          applySnapshot(snap.data());
+          setSaveState("on", "前回の続きを読み込みました");
+        }
+      }).catch(function(){});
+      d.collection("plans").orderBy("savedAt", "desc").limit(20).onSnapshot(function(qs){
+        var plans = qs.docs.map(function(doc){
+          var o = doc.data(); o.id = doc.id; return o;
+        });
+        renderPlans(plans);
+      }, function(){ });
+    }).catch(function(){});
+  }
+})();
+</script>
