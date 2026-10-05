@@ -395,7 +395,7 @@ function makeRook() {
   const merlons = 8, sector = (Math.PI * 2) / merlons;
   const f = (x, y, z) => {
     // core column and the three discs
-    let d = sd.cyl(x, y, z, coreR, 0, 112, 2);
+    let d = sd.cyl(x, y, z, coreR, 0, 100, 2);
     d = sd.smin(d, sd.cyl(x, y, z, 44.5, 0, 23, 4.5), 2);
     d = sd.smin(d, sd.cyl(x, y, z, 45, 43, 71, 4.5), 2);
     d = sd.smin(d, sd.cyl(x, y, z, 44.5, 84, 110, 4.5), 2);
