@@ -7,12 +7,13 @@
     --floor: #dfe2e6;
     --fg: #2b2f36;
     --muted: #6b717c;
+    --panel: #f7f8f9;
     --font-ui: "Zen Kaku Gothic New", "Hiragino Sans", "Noto Sans JP", system-ui, sans-serif;
   }
   @media (prefers-color-scheme: dark) {
-    :root:not([data-theme="light"]) { --bg: #1b1e23; --floor: #23272d; --fg: #e6e8eb; --muted: #9aa1ab; color-scheme: dark; }
+    :root:not([data-theme="light"]) { --bg: #1b1e23; --floor: #23272d; --fg: #e6e8eb; --muted: #9aa1ab; --panel: #2b3037; color-scheme: dark; }
   }
-  :root[data-theme="dark"] { --bg: #1b1e23; --floor: #23272d; --fg: #e6e8eb; --muted: #9aa1ab; color-scheme: dark; }
+  :root[data-theme="dark"] { --bg: #1b1e23; --floor: #23272d; --fg: #e6e8eb; --muted: #9aa1ab; --panel: #2b3037; color-scheme: dark; }
   html, body { height: 100%; }
   body { background: var(--bg); color: var(--fg); font-family: var(--font-ui); overflow: hidden; }
   #stage { position: fixed; inset: 0; }
@@ -23,10 +24,26 @@
   }
   .caption strong { font-size: 15px; font-weight: 700; letter-spacing: 0.02em; }
   .caption span { font-size: 12px; color: var(--muted); }
+  .views {
+    position: fixed; right: 16px; top: calc(16px + env(safe-area-inset-top, 0px));
+    display: flex; gap: 4px; padding: 4px; border-radius: 10px;
+    background: var(--panel); box-shadow: 0 1px 3px rgba(0,0,0,0.12);
+  }
+  .views button {
+    font: inherit; font-size: 13px; color: var(--muted); background: transparent;
+    border: 0; border-radius: 7px; padding: 6px 12px; cursor: pointer;
+  }
+  .views button[aria-pressed="true"] { background: var(--fg); color: var(--bg); }
+  .views button:focus-visible { outline: 2px solid var(--fg); outline-offset: 2px; }
 </style>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Zen+Kaku+Gothic+New:wght@400;700&display=swap">
 
 <div id="stage"></div>
+<div class="views" role="group" aria-label="表示モード">
+  <button type="button" id="view-solid" data-mode="solid" aria-pressed="true">ソリッド</button>
+  <button type="button" id="view-wire" data-mode="wire" aria-pressed="false">ワイヤー</button>
+  <button type="button" id="view-both" data-mode="both" aria-pressed="false">両方</button>
+</div>
 <div class="caption">
   <strong>試作 01 — 球体</strong>
   <span>ドラッグで回転 / ホイール・ピンチで拡大縮小</span>
@@ -72,10 +89,28 @@ scene.add(rim);
 
 // The piece: a white sphere (placeholder for the character pieces)
 const white = new THREE.MeshStandardMaterial({ color: 0xf7f7f5, roughness: 0.45, metalness: 0 });
-const sphere = new THREE.Mesh(new THREE.SphereGeometry(0.8, 64, 48), white);
+const sphere = new THREE.Mesh(new THREE.SphereGeometry(0.8, 32, 24), white);
 sphere.position.y = 0.8;
 sphere.castShadow = true;
 scene.add(sphere);
+
+// Wireframe overlay (edges of the mesh)
+const wireMat = new THREE.LineBasicMaterial({ transparent: true, opacity: 0.55 });
+const wire = new THREE.LineSegments(new THREE.WireframeGeometry(sphere.geometry), wireMat);
+wire.visible = false;
+sphere.add(wire);
+
+function setMode(mode) {
+  sphere.material.visible = mode !== "wire";
+  sphere.castShadow = mode !== "wire";
+  wire.visible = mode !== "solid";
+  document.querySelectorAll(".views button").forEach((b) => {
+    b.setAttribute("aria-pressed", String(b.dataset.mode === mode));
+  });
+}
+document.querySelectorAll(".views button").forEach((b) => {
+  b.addEventListener("click", () => setMode(b.dataset.mode));
+});
 
 // Floor
 const floorMat = new THREE.MeshStandardMaterial({ roughness: 1 });
@@ -87,6 +122,7 @@ scene.add(floor);
 function applyTheme() {
   scene.background = new THREE.Color(css("--bg"));
   floorMat.color.set(css("--floor"));
+  wireMat.color.set(css("--fg"));
   scene.fog = new THREE.Fog(scene.background, 7, 14);
 }
 applyTheme();
