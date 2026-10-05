@@ -388,13 +388,13 @@ function meshSDF(f, { min, max, step }) {
 
 // The hooded face for distance-field pieces: same opening, lip and mask sizes as the pawn
 const FACE = { openR: 25, lip: 5, maskR: 24.6, bulge: 10 };
-function faceOpening(d, x, y, z, { cy, floorZ, lip = FACE.lip }) {
-  const hole = Math.max(Math.hypot(x, y - cy) - FACE.openR, floorZ - z);
+function faceOpening(d, x, y, z, { cx = 0, cy, floorZ, lip = FACE.lip }) {
+  const hole = Math.max(Math.hypot(x - cx, y - cy) - FACE.openR, floorZ - z);
   return sd.smax(d, -hole, lip);
 }
-function addMask(parent, { cy, floorZ }) {
+function addMask(parent, { cx = 0, cy, floorZ }) {
   const mask = maskMesh({ r: FACE.maskR * PX, z0: floorZ * PX, bulge: FACE.bulge * PX });
-  mask.position.y = cy * PX;
+  mask.position.set(cx * PX, cy * PX, 0);
   parent.add(mask);
 }
 
@@ -468,52 +468,60 @@ function polygonField(points, { min, max, step }) {
 const smoothLoop = (pts, samples) => new THREE.CatmullRomCurve3(pts.map(([x, y]) => new THREE.Vector3(x, y, 0)), true, "centripetal")
   .getPoints(samples).slice(0, -1).map((v) => [v.x, v.y]); // drop the repeated closing point
 
-// Knight: a classic horse-head profile (facing left), given thickness with softly rounded edges,
-// a thin fin of mane along the back, pressed-in eyes, on a stepped round base.
+// Knight: a classic Staunton-style horse head, traced from a reference side view so the profile
+// reads as a horse. The outline is given thickness with rounded edges; two ears stand on top;
+// the set's mask sits in a milled pocket low on the neck, on the side facing the viewer.
 function makeKnight() {
   const g = new THREE.Group();
-  // Side silhouette, photo-pixel units, y up from the floor, muzzle towards -x
+  // Reference outline in its own image pixels (horse facing right), mapped to piece pixels:
+  // mirrored so the muzzle points to -x, scaled, and stood on the collar at y = 33.
+  const S = 0.284, OX = 510, OY = 690, BASE = 33;
+  const map = ([X, Y]) => [-(X - OX) * S, BASE + (OY - Y) * S];
   const horse = smoothLoop([
-    [-22, 34], [-30, 50], [-31, 66], [-26, 82], [-18, 94], [-14, 104], [-20, 114], [-36, 120], [-52, 126],
-    [-62, 134], [-66, 145], [-63, 156], [-52, 164], [-38, 173], [-26, 182], [-18, 190], [-14, 204],
-    [-6, 193], [2, 186], [12, 172], [20, 150], [23, 126], [22, 102], [18, 82], [17, 64], [22, 48], [26, 38], [24, 34],
-  ], 240);
-  // mane: a thin fin whose inner edge sits inside the neck, so it grows out of the body
-  const mane = smoothLoop([
-    [0, 194], [14, 183], [27, 165], [35, 139], [37, 110], [33, 82], [27, 60], [20, 50],
-    [15, 64], [17, 84], [19, 104], [19, 128], [16, 150], [8, 170], [0, 182],
-  ], 160);
-  const horseD = polygonField(horse, { min: [-75, 25], max: [45, 212], step: 0.4 });
-  const maneD = polygonField(mane, { min: [-10, 42], max: [45, 202], step: 0.4 });
-  // half thickness: broad chest, narrower head and muzzle, thin ears
+    [612, 690], [624, 630], [628, 570], [620, 505], [600, 445], [572, 372],
+    [610, 392], [655, 420], [690, 440], [720, 432], [745, 408], [756, 376], [748, 344], [725, 315],
+    [695, 275], [660, 228], [632, 190], [612, 160], [590, 135], [560, 118], [520, 106], [470, 104],
+    [420, 108], [375, 118], [355, 140], [345, 152], [351, 162], [337, 184], [343, 193], [329, 216],
+    [336, 226], [322, 250], [329, 260], [316, 286], [312, 330], [314, 390], [325, 460], [348, 535],
+    [382, 605], [415, 660], [425, 690],
+  ].map(map), 360);
+  const horseD = polygonField(horse, { min: [-75, 25], max: [65, 215], step: 0.35 });
+  // half thickness: broad lower neck, slimmer head, tapering toward the muzzle
   const halfW = (x, y) => {
-    let w = THREE.MathUtils.lerp(17, 12, THREE.MathUtils.clamp((y - 95) / 60, 0, 1));
-    w -= THREE.MathUtils.clamp((-x - 38) / 22, 0, 1) * 2.5; // taper toward the muzzle
-    w = THREE.MathUtils.lerp(w, 4.5, THREE.MathUtils.clamp((y - 180) / 8, 0, 1)); // ears
+    let w = THREE.MathUtils.lerp(20, 13.5, THREE.MathUtils.clamp((y - 105) / 50, 0, 1));
+    w -= THREE.MathUtils.clamp((-x - 40) / 24, 0, 1) * 2.5;
     return w;
   };
   const extrude = (d2, z, h, r) => {
     const wx = d2 + r, wz = Math.abs(z) - h + r;
     return Math.min(Math.max(wx, wz), 0) + Math.hypot(Math.max(wx, 0), Math.max(wz, 0)) - r;
   };
-  const f = (x, y, z) => {
-    // stepped base
-    let d = sd.cyl(x, y, z, 40, 0, 10, 3);
-    d = sd.smin(d, sd.cyl(x, y, z, 35, 9, 18, 2.5), 1.2);
-    d = sd.smin(d, sd.cyl(x, y, z, 30, 17, 26, 2), 1.2);
-    d = sd.smin(d, sd.cyl(x, y, z, 26, 25, 33, 1.5), 1.2);
-    // horse body and head, then the mane fin
-    d = sd.smin(d, extrude(horseD(x, y), z, halfW(x, y), 5), 4);
-    d = sd.smin(d, extrude(maneD(x, y), z, 3.2, 1.5), 2);
-    return d;
+  // tapered ear: a capsule from base (bx, by) to tip (tx, ty) whose radius shrinks toward the tip
+  const ear = (x, y, z, bx, by, tx, ty, ez, r0, r1) => {
+    const ax = tx - bx, ay = ty - by, px = x - bx, py = y - by;
+    const t = Math.min(Math.max((px * ax + py * ay) / (ax * ax + ay * ay), 0), 1);
+    return Math.hypot(px - ax * t, py - ay * t, z - ez) - THREE.MathUtils.lerp(r0, r1, t);
   };
-  const geo = meshSDF(f, { min: [-70, -2, -42], max: [44, 208, 42], step: 0.6 });
+  const face = { cx: 2, cy: 76, floorZ: 15, lip: 2 };
+  const f = (x, y, z) => {
+    // round base: two discs with a groove, and a squat collar
+    let d = sd.cyl(x, y, z, 44, 0, 10, 2.5);
+    d = sd.smin(d, sd.cyl(x, y, z, 43, 11, 22, 3.5), 1);
+    d = sd.smin(d, sd.cyl(x, y, z, 31, 21, 34, 5), 3);
+    // horse
+    d = sd.smin(d, extrude(horseD(x, y), z, halfW(x, y), 4.5), 3);
+    for (const ez of [-6.5, 6.5]) d = sd.smin(d, ear(x, y, z, -22, 186, -28, 206, ez, 5.5, 1.6), 3);
+    return faceOpening(d, x, y, z, face);
+  };
+  const geo = meshSDF(f, { min: [-72, -2, -46], max: [60, 212, 46], step: 0.65 });
   geo.scale(PX, PX, PX);
   add(g, geo, stone);
+  addMask(g, face);
   // pressed-in eyes on both sides of the head, in the set's ink colour
+  const [ex, ey] = map([618, 215]);
   for (const s of [-1, 1]) {
     const eye = add(g, new THREE.SphereGeometry(2.6 * PX, 20, 14), ink, {
-      pos: [-36 * PX, 166 * PX, s * (halfW(-36, 166) - 0.6) * PX], scale: [1, 1.25, 0.5],
+      pos: [ex * PX, ey * PX, s * (halfW(ex, ey) - 0.6) * PX], scale: [1.25, 1, 0.5],
     });
     eye.castShadow = false;
   }
