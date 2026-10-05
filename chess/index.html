@@ -51,7 +51,8 @@
 </div>
 <div class="views pieces" role="group" aria-label="駒">
   <button type="button" id="piece-pawn" data-piece="pawn" aria-pressed="false">ポーン</button>
-  <button type="button" id="piece-rook" data-piece="rook" aria-pressed="true">ルーク</button>
+  <button type="button" id="piece-rook" data-piece="rook" aria-pressed="false">ルーク</button>
+  <button type="button" id="piece-knight" data-piece="knight" aria-pressed="true">ナイト</button>
 </div>
 <div class="views sides" role="group" aria-label="先手・後手">
   <button type="button" id="side-white" data-side="white" aria-pressed="true">白</button>
@@ -64,7 +65,7 @@
   <label for="color-ink">目と鼻 <input type="color" id="color-ink" data-part="ink" value="#1c1c1c"></label>
 </div>
 <div class="caption">
-  <strong id="piece-name">ROOK</strong>
+  <strong id="piece-name">KNIGHT</strong>
   <span>ドラッグで回転 / ホイール・ピンチで拡大縮小</span>
 </div>
 
@@ -435,9 +436,50 @@ function makeRook() {
   return g;
 }
 
+// Knight: an original take on the classic horse head. Pawn-like flared base and raised band,
+// a broad chest carrying the milled face pocket, a neck leaning back, a muzzle angled down,
+// blocky ears and a stepped mane in the rook's angular language.
+function makeKnight() {
+  const g = new THREE.Group();
+  const face = { cy: 88, floorZ: 19, lip: 2 };
+  // rounded box rotated about the x axis around its own centre
+  const tiltBox = (x, y, z, cx, cy, cz, hx, hy, hz, rb, a) => {
+    const c = Math.cos(a), s = Math.sin(a);
+    const dy = y - cy, dz = z - cz;
+    return sd.box(x, dy * c + dz * s, -dy * s + dz * c, 0, 0, 0, hx, hy, hz, rb);
+  };
+  // pawn-like flared skirt as a surface of revolution: wide hem easing into a narrow waist
+  const skirtTop = 46;
+  const skirtR = (h) => 30 + 14 * (1 - Math.min(Math.max(h, 0), skirtTop) / skirtTop) ** 2;
+  const f = (x, y, z) => {
+    let d = Math.max((Math.hypot(x, z) - skirtR(y)) * 0.85, -y, y - skirtTop - 2);
+    d = sd.smin(d, sd.cyl(x, y, z, 44, 0, 6, 3), 3); // softened hem edge
+    // raised band
+    d = sd.smin(d, sd.cyl(x, y, z, 33.5, skirtTop, skirtTop + 10, 1.5), 1);
+    // chest: broad, with a flat front for the face
+    d = sd.smin(d, sd.box(x, y, z, 0, 88, 0, 31, 32, 24, 7), 4);
+    // neck leaning back
+    d = sd.smin(d, tiltBox(x, y, z, 0, 132, -5, 20, 30, 19, 8, -0.35), 9);
+    // head with the muzzle angled forward and down
+    d = sd.smin(d, tiltBox(x, y, z, 0, 162, 12, 16.5, 14.5, 31, 7, 0.55), 8);
+    // ears
+    for (const sx of [-1, 1]) d = sd.smin(d, tiltBox(x, y, z, sx * 10, 184, -9, 5.5, 11, 6, 1.8, -0.25), 2);
+    // stepped mane down the back of the neck
+    for (let i = 0; i < 5; i++) {
+      d = sd.smin(d, sd.box(x, y, z, 0, 174 - i * 13, -21 - i * 3, 5, 5.5, 7, 1.2), 1.4);
+    }
+    return faceOpening(d, x, y, z, face);
+  };
+  const geo = meshSDF(f, { min: [-50, -2, -50], max: [50, 200, 60], step: 0.7 });
+  geo.scale(PX, PX, PX);
+  add(g, geo, stone);
+  addMask(g, face);
+  return g;
+}
+
 // ---------------------------------------------------------------------------
-const builders = { pawn: makePawn, rook: makeRook };
-const names = { pawn: "PAWN", rook: "ROOK" };
+const builders = { pawn: makePawn, rook: makeRook, knight: makeKnight };
+const names = { pawn: "PAWN", rook: "ROOK", knight: "KNIGHT" };
 const built = {};
 const wireMat = new THREE.LineBasicMaterial({ color: 0x2a2a28, transparent: true, opacity: 0.4 });
 let wires = [];
@@ -514,7 +556,7 @@ swatches.querySelectorAll("input[type=color]").forEach((input) => {
 document.querySelectorAll("[data-side]").forEach((b) => {
   b.addEventListener("click", () => setSide(b.dataset.side));
 });
-showPiece("rook");
+showPiece("knight");
 
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.target.set(0, 1.1, 0);
