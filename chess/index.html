@@ -187,27 +187,41 @@ function maskMesh({ r, z0, bulge }) {
     tool.updateMatrixWorld();
     result = csg.evaluate(result, tool, SUBTRACTION);
   };
-  const eyeR = 4.2 * PX;
-  for (const x of [-12 * PX, 12 * PX]) {
-    const y = 1.5 * PX;
+  const eyeR = 0.177 * r;
+  for (const x of [-0.506 * r, 0.506 * r]) {
+    const y = 0.063 * r;
     press(new THREE.SphereGeometry(eyeR, 24, 16).translate(x, y, surfaceZ(x, y) + eyeR * 0.45));
   }
-  const noseR = 1.8 * PX;
-  const noseY = 0.5 * PX;
-  press(new THREE.CapsuleGeometry(noseR, 10 * PX, 6, 12).translate(0, noseY, surfaceZ(0, noseY) + noseR * 0.2));
+  const noseR = 0.076 * r;
+  const noseY = 0.02 * r;
+  press(new THREE.CapsuleGeometry(noseR, 0.42 * r, 6, 12).translate(0, noseY, surfaceZ(0, noseY) + noseR * 0.2));
 
   const mesh = new THREE.Mesh(result.geometry, result.material);
   mesh.castShadow = mesh.receiveShadow = true;
   return mesh;
 }
 
-// Feet: two blocky, slightly splayed feet peeking out under the hem
-function addFeet(parent, { spread, width, depth, height }) {
+// Feet: two blocky feet. Only the toes peek out under the hem; the blocks run far back
+// so the footprint sits under the centre of mass and a printed piece stands steadily.
+function addFeet(parent, { spread, width, height, front, back }) {
+  const depth = front + back;
   for (const s of [-1, 1]) {
     add(parent, new RoundedBoxGeometry(width, height, depth, 3, 0.035), stone, {
-      pos: [s * spread, height / 2, 0.1], rot: [0, s * 0.12, 0],
+      pos: [s * spread, height / 2, (front - back) / 2],
     });
   }
+}
+
+// Shared hooded head used by every piece: a sphere with a soft-rimmed opening,
+// a domed mask and recessed eyes and nose. All face proportions scale with R (world units).
+// The pawn's values (R = 42px) are the reference look.
+function makeHoodedHead(R) {
+  const head = new THREE.Group();
+  const k = R / 42;
+  const { geo, rimZ } = hoodGeometry({ R, openR: 25 * k, lip: 3.5 * k, depth: 9 * k });
+  add(head, geo, stone);
+  head.add(maskMesh({ r: 23.7 * k, z0: rimZ - 5 * k, bulge: 10 * k }));
+  return head;
 }
 
 function makePawn() {
@@ -226,8 +240,8 @@ function makePawn() {
   }
   const column = spline([[neckR, cY], [25.2, 108], [25.6, 120], [26.3, 130.6]], 30).slice(1);
   const neck = [...fillet, ...column];
-  // Raised band: a flat strip with crisp edges
-  const band = [[26.5, 131.2], [27.7, 131.9], [28.2, 143.1], [27.8, 143.9], [28.3, 144.4]];
+  // Raised band: stands proud of both the neck and the top of the skirt, with slightly rounded edges
+  const band = [[27, 131], [30.4, 131.3], [31.3, 132.2], [31.5, 137.5], [31.3, 142.8], [30.4, 143.7], [28.4, 144]];
   const skirt = spline([
     [28.6, 145], [30.5, 152], [33, 160], [36, 168], [39.5, 176], [42.5, 183], [43.8, 187], [43.6, 189.5], [42.6, 191],
   ], 40);
@@ -236,14 +250,11 @@ function makePawn() {
     .reverse(); // lathe expects bottom-to-top so the faces point outward
   add(g, new THREE.LatheGeometry(profile, 96), stone);
 
-  const head = new THREE.Group();
+  const head = makeHoodedHead(R * PX);
   head.position.y = (205 - headY) * PX;
   g.add(head);
-  const { geo, rimZ } = hoodGeometry({ R: R * PX, openR: 25 * PX, lip: 3.5 * PX, depth: 9 * PX });
-  add(head, geo, stone);
-  head.add(maskMesh({ r: 23.7 * PX, z0: rimZ - 5 * PX, bulge: 10 * PX }));
 
-  addFeet(g, { spread: 19.5 * PX, width: 20 * PX, depth: 24 * PX, height: 20 * PX });
+  addFeet(g, { spread: 19.5 * PX, width: 20 * PX, height: 20 * PX, front: 26 * PX, back: 34 * PX });
   return g;
 }
 
