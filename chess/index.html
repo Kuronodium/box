@@ -123,9 +123,11 @@ const ink = new THREE.MeshStandardMaterial({ color: 0x1c1c1c, roughness: 0.6, me
 const materials = [stone, porcelain, ink];
 
 // Proportions are traced from the reference photo in pixels:
-// y is measured down from the top of the crop, feet touch the floor at y = 205.
+// y is measured down from the top of the crop. The hem sits at y = 191.2; the floor is set
+// a little higher than in the photo (feet show 2/3 of the photo's height).
 const PX = 2.2 / 192;
-const toWorld = ([r, y]) => [r * PX, (205 - y) * PX];
+const FLOOR_Y = 200.4;
+const toWorld = ([r, y]) => [r * PX, (FLOOR_Y - y) * PX];
 
 function spline(points, samples) {
   const curve = new THREE.CatmullRomCurve3(points.map(([r, y]) => new THREE.Vector3(r, y, 0)), false, "centripetal");
@@ -251,10 +253,10 @@ function makePawn() {
   add(g, new THREE.LatheGeometry(profile, 96), stone);
 
   const head = makeHoodedHead(R * PX);
-  head.position.y = (205 - headY) * PX;
+  head.position.y = (FLOOR_Y - headY) * PX;
   g.add(head);
 
-  addFeet(g, { spread: 19.5 * PX, width: 20 * PX, height: 20 * PX, front: 26 * PX, back: 34 * PX });
+  addFeet(g, { spread: 19.5 * PX, width: 20 * PX, height: 15 * PX, front: 26 * PX, back: 26 * PX });
   return g;
 }
 
