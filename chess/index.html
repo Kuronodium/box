@@ -56,7 +56,6 @@
 <script type="module">
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
-import { RoundedBoxGeometry } from "three/addons/geometries/RoundedBoxGeometry.js";
 import { Brush, Evaluator, SUBTRACTION } from "three-bvh-csg";
 
 const stage = document.getElementById("stage");
@@ -123,10 +122,9 @@ const ink = new THREE.MeshStandardMaterial({ color: 0x1c1c1c, roughness: 0.6, me
 const materials = [stone, porcelain, ink];
 
 // Proportions are traced from the reference photo in pixels:
-// y is measured down from the top of the crop. The hem sits at y = 191.2; the floor is set
-// a little higher than in the photo (feet show 2/3 of the photo's height).
+// y is measured down from the top of the crop. No feet: the hem rests on the floor.
 const PX = 2.2 / 192;
-const FLOOR_Y = 200.4;
+const FLOOR_Y = 191.2;
 const toWorld = ([r, y]) => [r * PX, (FLOOR_Y - y) * PX];
 
 function spline(points, samples) {
@@ -148,34 +146,34 @@ function add(parent, geometry, material, { pos = [0, 0, 0], rot = [0, 0, 0], sca
 const csg = new Evaluator();
 csg.useGroups = true;
 
-// Round hooded head, built as a surface of revolution around the face axis (+z):
-// sphere -> rounded lip -> inner wall -> floor. The lip fillet keeps the rim soft.
-function hoodGeometry({ R, openR, lip, depth }) {
-  const cR = openR + lip;                       // fillet centre, radial
+// Hood opening cutter, a solid of revolution around the face axis (+z) through the head centre.
+// Subtracting it leaves: rounded lip -> short inner wall -> flat floor. The lip fillet keeps the rim soft.
+function hoodCutter({ R, openR, lip, depth }) {
+  const cR = openR + lip;                         // fillet centre, radial
   const cZ = Math.sqrt((R - lip) ** 2 - cR ** 2); // fillet centre, along the face axis
-  const startA = Math.atan2(cZ, cR);             // where the fillet meets the sphere
-  const pts = [];
-  // Sphere from the back pole up to the fillet
-  const sphereSteps = 72;
-  for (let i = 0; i <= sphereSteps; i++) {
-    const a = -Math.PI / 2 + (startA + Math.PI / 2) * (i / sphereSteps);
-    pts.push(new THREE.Vector2(R * Math.cos(a), R * Math.sin(a)));
-  }
-  // Rounded lip rolling into the opening
-  const lipSteps = 16;
-  for (let i = 1; i <= lipSteps; i++) {
-    const a = startA + (Math.PI - startA) * (i / lipSteps);
+  const startA = Math.atan2(cZ, cR);              // where the fillet meets the sphere
+  const pts = [new THREE.Vector2(0, cZ - depth), new THREE.Vector2(openR, cZ - depth)];
+  // Wall, then the lip arc rolling out onto the sphere (the cutter is the space in front of it)
+  // (the arc stops a hair before it touches the sphere, so the cut never grazes the surface)
+  const endA = startA + 0.05;
+  for (let i = 0; i <= 20; i++) {
+    const a = Math.PI + (endA - Math.PI) * (i / 20);
     pts.push(new THREE.Vector2(cR + lip * Math.cos(a), cZ + lip * Math.sin(a)));
   }
-  // Inner wall and floor
-  pts.push(new THREE.Vector2(openR, cZ - depth));
-  pts.push(new THREE.Vector2(0, cZ - depth));
+  // Close the solid by riding just outside the sphere back to the front pole, so nothing
+  // outside the head (e.g. where the neck flares in under the chin) is touched
+  const shell = R * 1.006;
+  for (let i = 0; i <= 24; i++) {
+    const a = startA + (Math.PI / 2 - startA) * (i / 24);
+    pts.push(new THREE.Vector2(shell * Math.cos(a), shell * Math.sin(a)));
+  }
   const geo = new THREE.LatheGeometry(pts, 96);
   geo.rotateX(Math.PI / 2); // lathe axis y -> face axis z
-  return { geo, rimZ: cZ };
+  return { geo, floorZ: cZ - depth };
 }
 
-// Mask: a gently domed disc with eyes and a nose line pressed into it
+// Mask: a gently domed disc with eyes and a nose line pressed into it.
+// Its widest edge sits on the floor of the opening, so it fills the hole right up to the wall.
 function maskMesh({ r, z0, bulge }) {
   const domeGeo = new THREE.SphereGeometry(1, 64, 48);
   domeGeo.scale(r, r, bulge);
@@ -203,58 +201,75 @@ function maskMesh({ r, z0, bulge }) {
   return mesh;
 }
 
-// Feet: two blocky feet. Only the toes peek out under the hem; the blocks run far back
-// so the footprint sits under the centre of mass and a printed piece stands steadily.
-function addFeet(parent, { spread, width, height, front, back }) {
-  const depth = front + back;
-  for (const s of [-1, 1]) {
-    add(parent, new RoundedBoxGeometry(width, height, depth, 3, 0.035), stone, {
-      pos: [s * spread, height / 2, (front - back) / 2],
-    });
-  }
+// Shared hooded head used by every piece. The body lathe already contains the round head;
+// this cuts the soft-rimmed opening into it and seats the mask.
+// All face proportions scale with R (world units); the pawn's values (R = 42px) are the reference look.
+function addHoodedFace(parent, bodyGeo, { R, centerY, tilt = THREE.MathUtils.degToRad(6) }) {
+  const k = R / 42;
+  const openR = 25 * k;
+  const { geo, floorZ } = hoodCutter({ R, openR, lip: 3.5 * k, depth: 5 * k });
+  geo.rotateX(-tilt); // face looks very slightly upward, which keeps the chin clear of the neck flare
+  geo.translate(0, centerY, 0);
+  const body = new Brush(bodyGeo, stone);
+  const cutter = new Brush(geo, stone);
+  body.updateMatrixWorld();
+  cutter.updateMatrixWorld();
+  const result = csg.evaluate(body, cutter, SUBTRACTION);
+  add(parent, result.geometry, result.material);
+  const mask = maskMesh({ r: openR - 0.4 * k, z0: floorZ, bulge: 10 * k });
+  mask.position.y = centerY;
+  mask.rotation.x = -tilt;
+  parent.add(mask);
 }
 
-// Shared hooded head used by every piece: a sphere with a soft-rimmed opening,
-// a domed mask and recessed eyes and nose. All face proportions scale with R (world units).
-// The pawn's values (R = 42px) are the reference look.
-function makeHoodedHead(R) {
-  const head = new THREE.Group();
-  const k = R / 42;
-  const { geo, rimZ } = hoodGeometry({ R, openR: 25 * k, lip: 3.5 * k, depth: 9 * k });
-  add(head, geo, stone);
-  head.add(maskMesh({ r: 23.7 * k, z0: rimZ - 5 * k, bulge: 10 * k }));
-  return head;
+// Outline of a round head smoothly merged into a neck column (2D signed distances + smooth min),
+// so the head flows into the neck with continuous curvature instead of a crease.
+function headNeckOutline({ R, headY, neckR, neckBottomY, blend }) {
+  const smin = (a, b, k) => {
+    const h = Math.max(k - Math.abs(a - b), 0) / k;
+    return Math.min(a, b) - h * h * h * k / 6;
+  };
+  const sdf = (r, y) => {
+    const head = Math.hypot(r, y - headY) - R;
+    const neck = Math.max(r - neckR(y), headY - y); // column only below the head centre
+    return smin(head, neck, blend);
+  };
+  const pts = [];
+  const top = headY - R, steps = 220;
+  for (let i = 0; i <= steps; i++) {
+    // denser sampling near the top pole where the outline turns fastest
+    const u = i / steps;
+    const y = top + (neckBottomY - top) * (u < 0.15 ? (u / 0.15) ** 2 * 0.15 : u);
+    let lo = 0, hi = R * 2;
+    if (sdf(lo, y) > 0) { pts.push([0, y]); continue; }
+    for (let j = 0; j < 40; j++) {
+      const mid = (lo + hi) / 2;
+      if (sdf(mid, y) > 0) hi = mid; else lo = mid;
+    }
+    pts.push([lo, y]);
+  }
+  pts[0] = [0, top];
+  return pts;
 }
 
 function makePawn() {
   const g = new THREE.Group();
 
-  // Head: a clean sphere (the photo's head is softened into a round one)
+  // Head: a clean sphere (the photo's head is softened into a round one), merged into the neck
   const R = 42, headY = 54; // px
-  // Neck: leaves the sphere tangentially and eases into a gently waisted column (cubic Bezier)
-  const joinA = THREE.MathUtils.degToRad(42); // measured up from the bottom pole of the head
-  const P0 = new THREE.Vector2(R * Math.sin(joinA), headY + R * Math.cos(joinA));
-  const down = new THREE.Vector2(-Math.cos(joinA), Math.sin(joinA)); // sphere tangent, heading down
-  const P3 = new THREE.Vector2(26.3, 130.6);
-  const neckCurve = new THREE.CubicBezierCurve(
-    P0, P0.clone().addScaledVector(down, 9), new THREE.Vector2(25.2, 112), P3,
-  );
-  const neck = neckCurve.getPoints(48).map((v) => [v.x, v.y]);
+  const neckR = (y) => THREE.MathUtils.lerp(24.6, 26.3, THREE.MathUtils.clamp((y - 96) / (130.6 - 96), 0, 1));
+  const headNeck = headNeckOutline({ R, headY, neckR, neckBottomY: 130.6, blend: 9 });
   // Raised band: stands proud of both the neck and the top of the skirt, with slightly rounded edges
   const band = [[27, 131], [30.4, 131.3], [31.3, 132.2], [31.5, 137.5], [31.3, 142.8], [30.4, 143.7], [28.4, 144]];
   const skirt = spline([
     [28.6, 145], [30.5, 152], [33, 160], [36, 168], [39.5, 176], [42.5, 183], [43.8, 187], [43.6, 189.5], [42.6, 191],
   ], 40);
-  const profile = [...neck, ...band, ...skirt, [30, 191.2], [0, 191.2]]
+  const profile = [...headNeck, ...band, ...skirt, [30, 191.2], [0, 191.2]]
     .map(toWorld).map(([r, y]) => new THREE.Vector2(r, y))
     .reverse(); // lathe expects bottom-to-top so the faces point outward
-  add(g, new THREE.LatheGeometry(profile, 96), stone);
+  const bodyGeo = new THREE.LatheGeometry(profile, 96);
 
-  const head = makeHoodedHead(R * PX);
-  head.position.y = (FLOOR_Y - headY) * PX;
-  g.add(head);
-
-  addFeet(g, { spread: 19.5 * PX, width: 20 * PX, height: 15 * PX, front: 26 * PX, back: 26 * PX });
+  addHoodedFace(g, bodyGeo, { R: R * PX, centerY: (FLOOR_Y - headY) * PX });
   return g;
 }
 
