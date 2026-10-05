@@ -726,77 +726,9 @@ const pieceMats = {
   w: new THREE.MeshStandardMaterial({ color: 0xf1e4cc, roughness: 0.32, metalness: 0.02, envMapIntensity: 0.6 }),
   b: new THREE.MeshStandardMaterial({ color: 0x2b2420, roughness: 0.28, metalness: 0.05, envMapIntensity: 0.8 }),
 };
-const BASE = [[0, 0], [0.4, 0], [0.4, 0.05], [0.36, 0.09], [0.37, 0.12], [0.32, 0.15]];
-const lathe = pts => new THREE.LatheGeometry(pts.map(([r, y]) => new THREE.Vector2(r, y)), 40);
-
-const geoCache = {};
-function pieceParts(t) {
-  if (geoCache[t]) return geoCache[t];
-  const parts = [];
-  const add = (geo, x = 0, y = 0, z = 0) => parts.push({ geo, pos: [x, y, z] });
-  switch (t) {
-    case 'p':
-      add(lathe([...BASE, [0.24, 0.2], [0.15, 0.3], [0.12, 0.42], [0.21, 0.45], [0.21, 0.49], [0.12, 0.51], [0, 0.51]]));
-      add(new THREE.SphereGeometry(0.17, 32, 20), 0, 0.63, 0);
-      break;
-    case 'r': {
-      add(lathe([...BASE, [0.29, 0.2], [0.26, 0.3], [0.24, 0.62], [0.31, 0.66], [0.31, 0.84],
-        [0.22, 0.84], [0.22, 0.78], [0, 0.78]]));
-      const merlon = new THREE.BoxGeometry(0.13, 0.1, 0.09);
-      for (let k = 0; k < 6; k++) {
-        const a = (k / 6) * Math.PI * 2;
-        const g = merlon.clone().rotateY(Math.PI / 2 - a);
-        add(g, Math.cos(a) * 0.265, 0.89, Math.sin(a) * 0.265);
-      }
-      break;
-    }
-    case 'n': {
-      add(lathe([...BASE, [0.3, 0.2], [0.27, 0.27], [0, 0.27]]));
-      const sh = new THREE.Shape();
-      const pts = [[-0.22, 0.26], [0.2, 0.26], [0.15, 0.44], [0.08, 0.56], [0.27, 0.66], [0.33, 0.76], [0.28, 0.85],
-        [0.1, 0.91], [0.03, 1.02], [-0.03, 0.94], [-0.15, 0.88], [-0.24, 0.7], [-0.27, 0.48]];
-      sh.moveTo(...pts[0]);
-      pts.slice(1).forEach(p => sh.lineTo(...p));
-      const head = new THREE.ExtrudeGeometry(sh, {
-        depth: 0.26, bevelEnabled: true, bevelThickness: 0.04, bevelSize: 0.035, bevelSegments: 3,
-      });
-      head.translate(0, 0, -0.13);
-      add(head);
-      const eye = new THREE.SphereGeometry(0.028, 12, 8);
-      add(eye, 0.14, 0.8, 0.17);
-      add(eye.clone(), 0.14, 0.8, -0.17);
-      break;
-    }
-    case 'b':
-      add(lathe([...BASE, [0.27, 0.2], [0.18, 0.32], [0.13, 0.6], [0.23, 0.64], [0.23, 0.68], [0.12, 0.7], [0, 0.7]]));
-      add(lathe([[0, 0.68], [0.14, 0.72], [0.19, 0.82], [0.17, 0.93], [0.1, 1.01], [0.03, 1.05], [0, 1.05]]));
-      add(new THREE.SphereGeometry(0.055, 16, 12), 0, 1.09, 0);
-      break;
-    case 'q': {
-      add(lathe([...BASE, [0.31, 0.2], [0.2, 0.36], [0.14, 0.76], [0.26, 0.81], [0.26, 0.85], [0.16, 0.87],
-        [0.25, 1.1], [0.2, 1.1], [0, 1.03]]));
-      const ball = new THREE.SphereGeometry(0.045, 12, 10);
-      for (let k = 0; k < 8; k++) {
-        const a = (k / 8) * Math.PI * 2;
-        add(ball, Math.cos(a) * 0.23, 1.13, Math.sin(a) * 0.23);
-      }
-      add(new THREE.SphereGeometry(0.08, 16, 12), 0, 1.13, 0);
-      break;
-    }
-    case 'k':
-      add(lathe([...BASE, [0.31, 0.2], [0.2, 0.36], [0.15, 0.82], [0.27, 0.87], [0.27, 0.91], [0.17, 0.93],
-        [0.25, 1.14], [0, 1.16]]));
-      add(new THREE.BoxGeometry(0.07, 0.3, 0.07), 0, 1.3, 0);
-      add(new THREE.BoxGeometry(0.22, 0.07, 0.07), 0, 1.33, 0);
-      break;
-  }
-  geoCache[t] = parts;
-  return parts;
-}
-
-// ---------- original pawn, rook & knight ----------
+// ---------- original piece set ----------
 // Ported from the piece studio (chess/index.html on claude/awesome-ramanujan-w6cin5).
-// Synced with studio commit: 13d27ae
+// Synced with studio commit: dd4b95e
 // Built once with placeholder "role" materials, then cloned per colour.
 const stone = new THREE.MeshStandardMaterial({ name: 'stone' });
 const porcelain = new THREE.MeshStandardMaterial({ name: 'porcelain' });
@@ -1198,6 +1130,102 @@ function makeKnight() {
   return g;
 }
 
+// Surface of revolution as a distance field. `profile` is [radius, y] pairs traced from the photo
+// (y measured down the crop), listed top to bottom; it is mirrored across the axis so the
+// 2D outline has no seam on the axis. Returns (x, h, z) => distance, with h measured up from floor.
+function revolveField(profile, floorY, samples = 160) {
+  const right = profile.map(([r, y]) => [r, floorY - y]);
+  const left = right.slice().reverse().map(([r, h]) => [-r, h]);
+  const outline = smoothLoop([...right, ...left], samples);
+  const maxR = Math.max(...profile.map(([r]) => r)) + 6;
+  const top = floorY - Math.min(...profile.map(([, y]) => y)) + 6;
+  const field = polygonField(outline, { min: [-maxR, -6], max: [maxR, top], step: 0.7 });
+  return (x, h, z) => field(Math.hypot(x, z), h);
+}
+
+// Bishop: a tall mitre with a slit, swelling into a round belly that carries the face,
+// then a narrow waist, a raised band and the flared skirt.
+function makeBishop() {
+  const g = new THREE.Group();
+  const FLOOR = 268;
+  const body = revolveField([
+    [0, 46], [4, 49], [8, 53], [12, 58], [15.5, 63], [18, 69], [20.5, 74], [22.5, 79], [24, 85],
+    [25.5, 92], [26.8, 100], [27.5, 112], [28, 124], [28.6, 136], [30.2, 144], [33, 150], [35.5, 160],
+    [35.5, 172], [34, 182], [31.5, 190], [28, 198], [25.2, 205], [24.6, 212], [24.8, 216.5],
+    [27, 217.5], [27.3, 223.5], [27, 229.5], [25, 230.5], [25.6, 238], [27.8, 244], [30.7, 248],
+    [34, 252], [38, 256], [42, 260], [44, 263.5], [43.6, 266.3], [41.5, 268],
+  ], FLOOR);
+  const face = { cy: FLOOR - 160, floorZ: 21, lip: 4 };
+  const f = (x, y, z) => {
+    let d = body(x, y, z);
+    // slit in the mitre: a narrow slot through the head, widening toward the tip
+    const top = FLOOR - 46, slitBottom = FLOOR - 90;
+    const w = THREE.MathUtils.lerp(1.4, 3.4, THREE.MathUtils.clamp((y - slitBottom) / (top - slitBottom), 0, 1));
+    d = sd.smax(d, -Math.max(Math.abs(x) - w, slitBottom - y), 1);
+    return faceOpening(d, x, y, z, face);
+  };
+  const geo = meshSDF(f, { min: [-47, -2, -47], max: [47, 226, 47], step: 1.3 });
+  geo.scale(PX, PX, PX);
+  add(g, geo, stone);
+  addMask(g, face);
+  return g;
+}
+
+// Queen: a cylindrical head with a hollow zig-zag crown, a wide shoulder cape,
+// a slender waist and a broad flared skirt. The face is milled into the head like the rook's.
+function makeQueen() {
+  const g = new THREE.Group();
+  const FLOOR = 268;
+  const body = revolveField([
+    [0, 17], [35, 17], [35.5, 18.5], [35.5, 97], [37, 99.5], [44.5, 101.5], [48, 105], [48.5, 109.5],
+    [46.2, 114], [42, 122], [38, 132], [35, 142], [33, 150], [32, 158], [31.5, 170], [31.6, 190],
+    [32.5, 200], [34, 210], [36, 220], [39, 230], [43, 240], [47, 248], [51, 256], [54, 262],
+    [54.4, 265.3], [52.5, 268],
+  ], FLOOR);
+  const tipH = FLOOR - 17, valleyH = FLOOR - 35, wellH = FLOOR - 40;
+  const spikes = 8, sector = (Math.PI * 2) / spikes;
+  const face = { cy: FLOOR - 70, floorZ: 21, lip: 2 };
+  const f = (x, y, z) => {
+    let d = body(x, y, z);
+    // zig-zag crown: a valley sits dead centre above the face
+    const a = Math.atan2(z, x) / sector + 0.5;
+    const v = Math.abs((a - Math.floor(a)) - 0.5) * 2; // 1 at a spike tip, 0 in a valley
+    const crownTop = THREE.MathUtils.lerp(valleyH, tipH, v);
+    d = sd.smax(d, (y - crownTop) * 0.6, 1.2);
+    d = sd.smax(d, -sd.cyl(x, y, z, 29.5, wellH, 300, 1), 1.2); // hollow inside the crown
+    return faceOpening(d, x, y, z, face);
+  };
+  const geo = meshSDF(f, { min: [-57, -2, -57], max: [57, 254, 57], step: 1.8 });
+  geo.scale(PX, PX, PX);
+  add(g, geo, stone);
+  addMask(g, face);
+  return g;
+}
+
+// King: a round hooded head (the pawn's face) wearing a flat-topped flared hat,
+// a shoulder cape, a straight waist with a raised band and a flared skirt.
+function makeKing() {
+  const g = new THREE.Group();
+  const FLOOR = 262;
+  const headY = 82, headR = 36;
+  const sphere = [];
+  for (let y = 52; y <= 106; y += 3) sphere.push([Math.sqrt(headR ** 2 - (y - headY) ** 2), y]);
+  const body = revolveField([
+    [0, 20], [22.5, 20], [22.6, 22.5], [21, 30], [18.5, 38], [16, 45], [15.4, 49],
+    ...sphere,
+    [28, 108], [35.5, 109.6], [38.4, 112.5], [37.2, 117.5], [33.5, 125], [30.6, 135], [29.5, 145],
+    [29, 160], [29, 180], [29.4, 185.5], [31, 186.5], [31.2, 192], [31, 197], [29.6, 198],
+    [30.5, 205], [33, 215], [37, 225], [42, 235], [47, 244], [51, 250], [53.4, 256], [53.6, 259.3], [51.6, 262],
+  ], FLOOR);
+  const face = { cy: FLOOR - headY, floorZ: 21, lip: 4 };
+  const f = (x, y, z) => faceOpening(body(x, y, z), x, y, z, face);
+  const geo = meshSDF(f, { min: [-56, -2, -56], max: [56, 246, 56], step: 1.8 });
+  geo.scale(PX, PX, PX);
+  add(g, geo, stone);
+  addMask(g, face);
+  return g;
+}
+
 // Role materials per side: the body matches the other pieces; the black set inverts the features.
 const roleMats = {
   w: {
@@ -1211,14 +1239,16 @@ const roleMats = {
     ink: new THREE.MeshStandardMaterial({ color: 0xf0ece4, roughness: 0.6 }),
   },
 };
-// The studio pieces are 2.2 units tall; this brings them in line with the rest of the set
-// (pawns stay the shortest piece).
-const ORIGINAL_SCALE = { p: 0.4, r: 0.46, n: 0.46 };
+// The studio frames every piece at one scale, so their relative heights are part of the design.
+// One factor brings the whole set to board size (the queen, the tallest, ends up about 1.3 squares).
+const ORIGINAL_SCALE = 0.44;
 const originalTemplates = {};
 function makeOriginal(t, c) {
-  if (!originalTemplates[t]) originalTemplates[t] = { p: makePawn, r: makeRook, n: makeKnight }[t]();
+  if (!originalTemplates[t]) {
+    originalTemplates[t] = { p: makePawn, r: makeRook, n: makeKnight, b: makeBishop, q: makeQueen, k: makeKing }[t]();
+  }
   const g = originalTemplates[t].clone(true);
-  g.scale.setScalar(ORIGINAL_SCALE[t]);
+  g.scale.setScalar(ORIGINAL_SCALE);
   const swap = m => roleMats[c][m.name];
   g.traverse(o => {
     if (!o.isMesh) return;
@@ -1227,26 +1257,13 @@ function makeOriginal(t, c) {
   return g;
 }
 
-function makePiece(p, sq) {
+function makePiece(p) {
   const outer = new THREE.Group();
   const inner = new THREE.Group();
   outer.add(inner);
-  if (p.t === 'p' || p.t === 'r' || p.t === 'n') {
-    // Original pieces; their faces look toward the opponent.
-    inner.add(makeOriginal(p.t, p.c));
-    inner.rotation.y = p.c === 'w' ? Math.PI : 0;
-  } else {
-    for (const { geo, pos } of pieceParts(p.t)) {
-      const m = new THREE.Mesh(geo, pieceMats[p.c]);
-      m.position.set(...pos);
-      m.castShadow = true;
-      m.receiveShadow = true;
-      inner.add(m);
-    }
-    // Knights look toward the opponent, turned slightly toward the board centre.
-    const turn = (sq & 7) < 4 ? -0.6 : 0.6;
-    inner.rotation.y = p.c === 'w' ? Math.PI / 2 + turn : -Math.PI / 2 - turn;
-  }
+  // Faces look toward the opponent.
+  inner.add(makeOriginal(p.t, p.c));
+  inner.rotation.y = p.c === 'w' ? Math.PI : 0;
   outer.userData.inner = inner;
   outer.userData.lift = 0;
   return outer;
@@ -1291,7 +1308,7 @@ function sync(animate) {
     const target = sqPos(i);
     let g = meshes.get(p.id);
     if (!g) {
-      g = makePiece(p, i);
+      g = makePiece(p);
       g.position.copy(target);
       scene.add(g);
       meshes.set(p.id, g);
