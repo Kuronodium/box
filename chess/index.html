@@ -52,7 +52,10 @@
 <div class="views pieces" role="group" aria-label="駒">
   <button type="button" id="piece-pawn" data-piece="pawn" aria-pressed="false">ポーン</button>
   <button type="button" id="piece-rook" data-piece="rook" aria-pressed="false">ルーク</button>
-  <button type="button" id="piece-knight" data-piece="knight" aria-pressed="true">ナイト</button>
+  <button type="button" id="piece-knight" data-piece="knight" aria-pressed="false">ナイト</button>
+  <button type="button" id="piece-bishop" data-piece="bishop" aria-pressed="false">ビショップ</button>
+  <button type="button" id="piece-queen" data-piece="queen" aria-pressed="false">クイーン</button>
+  <button type="button" id="piece-king" data-piece="king" aria-pressed="true">キング</button>
 </div>
 <div class="views sides" role="group" aria-label="先手・後手">
   <button type="button" id="side-white" data-side="white" aria-pressed="true">白</button>
@@ -65,7 +68,7 @@
   <label for="color-ink">目と鼻 <input type="color" id="color-ink" data-part="ink" value="#1c1c1c"></label>
 </div>
 <div class="caption">
-  <strong id="piece-name">KNIGHT</strong>
+  <strong id="piece-name">KING</strong>
   <span>ドラッグで回転 / ホイール・ピンチで拡大縮小</span>
 </div>
 
@@ -541,9 +544,105 @@ function makeKnight() {
   return g;
 }
 
+// Surface of revolution as a distance field. `profile` is [radius, y] pairs traced from the photo
+// (y measured down the crop), listed top to bottom; it is mirrored across the axis so the
+// 2D outline has no seam on the axis. Returns (x, h, z) => distance, with h measured up from floor.
+function revolveField(profile, floorY, samples = 320) {
+  const right = profile.map(([r, y]) => [r, floorY - y]);
+  const left = right.slice().reverse().map(([r, h]) => [-r, h]);
+  const outline = smoothLoop([...right, ...left], samples);
+  const maxR = Math.max(...profile.map(([r]) => r)) + 6;
+  const top = floorY - Math.min(...profile.map(([, y]) => y)) + 6;
+  const field = polygonField(outline, { min: [-maxR, -6], max: [maxR, top], step: 0.35 });
+  return (x, h, z) => field(Math.hypot(x, z), h);
+}
+
+// Bishop: a tall mitre with a slit, swelling into a round belly that carries the face,
+// then a narrow waist, a raised band and the flared skirt.
+function makeBishop() {
+  const g = new THREE.Group();
+  const FLOOR = 268;
+  const body = revolveField([
+    [0, 46], [4, 49], [8, 53], [12, 58], [15.5, 63], [18, 69], [20.5, 74], [22.5, 79], [24, 85],
+    [25.5, 92], [26.8, 100], [27.5, 112], [28, 124], [28.6, 136], [30.2, 144], [33, 150], [35.5, 160],
+    [35.5, 172], [34, 182], [31.5, 190], [28, 198], [25.2, 205], [24.6, 212], [24.8, 216.5],
+    [27, 217.5], [27.3, 223.5], [27, 229.5], [25, 230.5], [25.6, 238], [27.8, 244], [30.7, 248],
+    [34, 252], [38, 256], [42, 260], [44, 263.5], [43.6, 266.3], [41.5, 268],
+  ], FLOOR);
+  const face = { cy: FLOOR - 160, floorZ: 21, lip: 4 };
+  const f = (x, y, z) => {
+    let d = body(x, y, z);
+    // slit in the mitre: a narrow slot through the head, widening toward the tip
+    const top = FLOOR - 46, slitBottom = FLOOR - 90;
+    const w = THREE.MathUtils.lerp(1.4, 3.4, THREE.MathUtils.clamp((y - slitBottom) / (top - slitBottom), 0, 1));
+    d = sd.smax(d, -Math.max(Math.abs(x) - w, slitBottom - y), 1);
+    return faceOpening(d, x, y, z, face);
+  };
+  const geo = meshSDF(f, { min: [-47, -2, -47], max: [47, 226, 47], step: 0.6 });
+  geo.scale(PX, PX, PX);
+  add(g, geo, stone);
+  addMask(g, face);
+  return g;
+}
+
+// Queen: a cylindrical head with a hollow zig-zag crown, a wide shoulder cape,
+// a slender waist and a broad flared skirt. The face is milled into the head like the rook's.
+function makeQueen() {
+  const g = new THREE.Group();
+  const FLOOR = 268;
+  const body = revolveField([
+    [0, 17], [35, 17], [35.5, 18.5], [35.5, 97], [37, 99.5], [44.5, 101.5], [48, 105], [48.5, 109.5],
+    [46.2, 114], [42, 122], [38, 132], [35, 142], [33, 150], [32, 158], [31.5, 170], [31.6, 190],
+    [32.5, 200], [34, 210], [36, 220], [39, 230], [43, 240], [47, 248], [51, 256], [54, 262],
+    [54.4, 265.3], [52.5, 268],
+  ], FLOOR);
+  const tipH = FLOOR - 17, valleyH = FLOOR - 35, wellH = FLOOR - 40;
+  const spikes = 8, sector = (Math.PI * 2) / spikes;
+  const face = { cy: FLOOR - 70, floorZ: 21, lip: 2 };
+  const f = (x, y, z) => {
+    let d = body(x, y, z);
+    // zig-zag crown: a valley sits dead centre above the face
+    const a = Math.atan2(z, x) / sector + 0.5;
+    const v = Math.abs((a - Math.floor(a)) - 0.5) * 2; // 1 at a spike tip, 0 in a valley
+    const crownTop = THREE.MathUtils.lerp(valleyH, tipH, v);
+    d = sd.smax(d, (y - crownTop) * 0.6, 1.2);
+    d = sd.smax(d, -sd.cyl(x, y, z, 29.5, wellH, 300, 1), 1.2); // hollow inside the crown
+    return faceOpening(d, x, y, z, face);
+  };
+  const geo = meshSDF(f, { min: [-57, -2, -57], max: [57, 254, 57], step: 0.65 });
+  geo.scale(PX, PX, PX);
+  add(g, geo, stone);
+  addMask(g, face);
+  return g;
+}
+
+// King: a round hooded head (the pawn's face) wearing a flat-topped flared hat,
+// a shoulder cape, a straight waist with a raised band and a flared skirt.
+function makeKing() {
+  const g = new THREE.Group();
+  const FLOOR = 262;
+  const headY = 82, headR = 36;
+  const sphere = [];
+  for (let y = 52; y <= 106; y += 3) sphere.push([Math.sqrt(headR ** 2 - (y - headY) ** 2), y]);
+  const body = revolveField([
+    [0, 20], [22.5, 20], [22.6, 22.5], [21, 30], [18.5, 38], [16, 45], [15.4, 49],
+    ...sphere,
+    [28, 108], [35.5, 109.6], [38.4, 112.5], [37.2, 117.5], [33.5, 125], [30.6, 135], [29.5, 145],
+    [29, 160], [29, 180], [29.4, 185.5], [31, 186.5], [31.2, 192], [31, 197], [29.6, 198],
+    [30.5, 205], [33, 215], [37, 225], [42, 235], [47, 244], [51, 250], [53.4, 256], [53.6, 259.3], [51.6, 262],
+  ], FLOOR);
+  const face = { cy: FLOOR - headY, floorZ: 21, lip: 4 };
+  const f = (x, y, z) => faceOpening(body(x, y, z), x, y, z, face);
+  const geo = meshSDF(f, { min: [-56, -2, -56], max: [56, 246, 56], step: 0.65 });
+  geo.scale(PX, PX, PX);
+  add(g, geo, stone);
+  addMask(g, face);
+  return g;
+}
+
 // ---------------------------------------------------------------------------
-const builders = { pawn: makePawn, rook: makeRook, knight: makeKnight };
-const names = { pawn: "PAWN", rook: "ROOK", knight: "KNIGHT" };
+const builders = { pawn: makePawn, rook: makeRook, knight: makeKnight, bishop: makeBishop, queen: makeQueen, king: makeKing };
+const names = { pawn: "PAWN", rook: "ROOK", knight: "KNIGHT", bishop: "BISHOP", queen: "QUEEN", king: "KING" };
 const built = {};
 const wireMat = new THREE.LineBasicMaterial({ color: 0x2a2a28, transparent: true, opacity: 0.4 });
 let wires = [];
@@ -564,6 +663,10 @@ function showPiece(key) {
   }
   piece = built[key];
   scene.add(piece);
+  // one framing for every piece (sized for the tallest), so their relative heights read true
+  const dir = camera.position.clone().sub(controls.target).normalize();
+  controls.target.set(0, 1.4, 0);
+  camera.position.copy(controls.target).addScaledVector(dir, 10.5);
   wires = [];
   piece.traverse((o) => { if (o.userData.isWire) wires.push(o); });
   setMode(mode);
@@ -620,7 +723,6 @@ swatches.querySelectorAll("input[type=color]").forEach((input) => {
 document.querySelectorAll("[data-side]").forEach((b) => {
   b.addEventListener("click", () => setSide(b.dataset.side));
 });
-showPiece("knight");
 
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.target.set(0, 1.1, 0);
@@ -640,6 +742,7 @@ function resize() {
 }
 new ResizeObserver(resize).observe(stage);
 resize();
+showPiece("king");
 
 renderer.setAnimationLoop(() => {
   controls.update();
