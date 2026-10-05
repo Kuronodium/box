@@ -231,17 +231,15 @@ function makePawn() {
 
   // Head: a clean sphere (the photo's head is softened into a round one)
   const R = 42, headY = 54; // px
-  // Neck: a straight column that rolls into the sphere through a concave fillet
-  const neckR = 25, F = 8;
-  const cR = neckR + F, cY = headY + Math.sqrt((R + F) ** 2 - cR ** 2);
-  const a1 = Math.atan2(headY - cY, -cR);
-  const fillet = [];
-  for (let i = 0; i <= 16; i++) {
-    const a = a1 + (-Math.PI - a1) * (i / 16);
-    fillet.push([cR + F * Math.cos(a), cY + F * Math.sin(a)]);
-  }
-  const column = spline([[neckR, cY], [25.2, 108], [25.6, 120], [26.3, 130.6]], 30).slice(1);
-  const neck = [...fillet, ...column];
+  // Neck: leaves the sphere tangentially and eases into a gently waisted column (cubic Bezier)
+  const joinA = THREE.MathUtils.degToRad(42); // measured up from the bottom pole of the head
+  const P0 = new THREE.Vector2(R * Math.sin(joinA), headY + R * Math.cos(joinA));
+  const down = new THREE.Vector2(-Math.cos(joinA), Math.sin(joinA)); // sphere tangent, heading down
+  const P3 = new THREE.Vector2(26.3, 130.6);
+  const neckCurve = new THREE.CubicBezierCurve(
+    P0, P0.clone().addScaledVector(down, 9), new THREE.Vector2(25.2, 112), P3,
+  );
+  const neck = neckCurve.getPoints(48).map((v) => [v.x, v.y]);
   // Raised band: stands proud of both the neck and the top of the skirt, with slightly rounded edges
   const band = [[27, 131], [30.4, 131.3], [31.3, 132.2], [31.5, 137.5], [31.3, 142.8], [30.4, 143.7], [28.4, 144]];
   const skirt = spline([
