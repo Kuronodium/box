@@ -1,0 +1,119 @@
+<title>White Chess Pieces</title>
+<meta name="description" content="シンプルなキャラクター風チェス駒の3Dプレビュー（試作：球体）">
+<style>
+  /* Layout: full-bleed 3D stage with a small caption in the corner */
+  :root {
+    --bg: #e9ebee;
+    --floor: #dfe2e6;
+    --fg: #2b2f36;
+    --muted: #6b717c;
+    --font-ui: "Zen Kaku Gothic New", "Hiragino Sans", "Noto Sans JP", system-ui, sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) { --bg: #1b1e23; --floor: #23272d; --fg: #e6e8eb; --muted: #9aa1ab; color-scheme: dark; }
+  }
+  :root[data-theme="dark"] { --bg: #1b1e23; --floor: #23272d; --fg: #e6e8eb; --muted: #9aa1ab; color-scheme: dark; }
+  html, body { height: 100%; }
+  body { background: var(--bg); color: var(--fg); font-family: var(--font-ui); overflow: hidden; }
+  #stage { position: fixed; inset: 0; }
+  #stage canvas { display: block; width: 100%; height: 100%; touch-action: none; }
+  .caption {
+    position: fixed; left: 16px; bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+    display: flex; flex-direction: column; gap: 2px; pointer-events: none;
+  }
+  .caption strong { font-size: 15px; font-weight: 700; letter-spacing: 0.02em; }
+  .caption span { font-size: 12px; color: var(--muted); }
+</style>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Zen+Kaku+Gothic+New:wght@400;700&display=swap">
+
+<div id="stage"></div>
+<div class="caption">
+  <strong>試作 01 — 球体</strong>
+  <span>ドラッグで回転 / ホイール・ピンチで拡大縮小</span>
+</div>
+
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+} }
+</script>
+<script type="module">
+import * as THREE from "three";
+import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+
+const stage = document.getElementById("stage");
+const css = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+stage.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(35, 1, 0.1, 100);
+camera.position.set(3.2, 2.4, 4.2);
+
+// Lighting: soft studio setup
+scene.add(new THREE.HemisphereLight(0xffffff, 0x9aa0a8, 1.2));
+const key = new THREE.DirectionalLight(0xffffff, 2.2);
+key.position.set(3, 6, 4);
+key.castShadow = true;
+key.shadow.mapSize.set(2048, 2048);
+key.shadow.radius = 6;
+key.shadow.camera.left = key.shadow.camera.bottom = -3;
+key.shadow.camera.right = key.shadow.camera.top = 3;
+scene.add(key);
+const rim = new THREE.DirectionalLight(0xffffff, 0.8);
+rim.position.set(-4, 3, -3);
+scene.add(rim);
+
+// The piece: a white sphere (placeholder for the character pieces)
+const white = new THREE.MeshStandardMaterial({ color: 0xf7f7f5, roughness: 0.45, metalness: 0 });
+const sphere = new THREE.Mesh(new THREE.SphereGeometry(0.8, 64, 48), white);
+sphere.position.y = 0.8;
+sphere.castShadow = true;
+scene.add(sphere);
+
+// Floor
+const floorMat = new THREE.MeshStandardMaterial({ roughness: 1 });
+const floor = new THREE.Mesh(new THREE.CircleGeometry(6, 64), floorMat);
+floor.rotation.x = -Math.PI / 2;
+floor.receiveShadow = true;
+scene.add(floor);
+
+function applyTheme() {
+  scene.background = new THREE.Color(css("--bg"));
+  floorMat.color.set(css("--floor"));
+  scene.fog = new THREE.Fog(scene.background, 7, 14);
+}
+applyTheme();
+matchMedia("(prefers-color-scheme: dark)").addEventListener("change", applyTheme);
+new MutationObserver(applyTheme).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.target.set(0, 0.8, 0);
+controls.enableDamping = true;
+controls.minDistance = 2.5;
+controls.maxDistance = 10;
+controls.maxPolarAngle = Math.PI * 0.49;
+controls.autoRotate = !matchMedia("(prefers-reduced-motion: reduce)").matches;
+controls.autoRotateSpeed = 1.2;
+controls.addEventListener("start", () => { controls.autoRotate = false; });
+
+function resize() {
+  const w = stage.clientWidth, h = stage.clientHeight;
+  renderer.setSize(w, h, false);
+  camera.aspect = w / h;
+  camera.updateProjectionMatrix();
+}
+new ResizeObserver(resize).observe(stage);
+resize();
+
+renderer.setAnimationLoop(() => {
+  controls.update();
+  renderer.render(scene, camera);
+});
+</script>
