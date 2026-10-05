@@ -1,19 +1,15 @@
 <title>White Chess Pieces</title>
-<meta name="description" content="シンプルなキャラクター風チェス駒の3Dプレビュー（試作：球体）">
+<meta name="description" content="写真を元にしたチェス駒の3Dモデル（ポーン）">
 <style>
-  /* Layout: full-bleed 3D stage with a small caption in the corner */
+  /* Layout: full-bleed seamless studio backdrop, one piece on a turntable, quiet labels at the edges.
+     Single deliberate look (white photo studio), so no dark variant. */
   :root {
-    --bg: #e9ebee;
-    --floor: #dfe2e6;
-    --fg: #2b2f36;
-    --muted: #6b717c;
-    --panel: #f7f8f9;
+    --bg: #ededeb;
+    --fg: #2a2a28;
+    --muted: #7a7a76;
+    --panel: #f7f7f5;
     --font-ui: "Zen Kaku Gothic New", "Hiragino Sans", "Noto Sans JP", system-ui, sans-serif;
   }
-  @media (prefers-color-scheme: dark) {
-    :root:not([data-theme="light"]) { --bg: #1b1e23; --floor: #23272d; --fg: #e6e8eb; --muted: #9aa1ab; --panel: #2b3037; color-scheme: dark; }
-  }
-  :root[data-theme="dark"] { --bg: #1b1e23; --floor: #23272d; --fg: #e6e8eb; --muted: #9aa1ab; --panel: #2b3037; color-scheme: dark; }
   html, body { height: 100%; }
   body { background: var(--bg); color: var(--fg); font-family: var(--font-ui); overflow: hidden; }
   #stage { position: fixed; inset: 0; }
@@ -22,16 +18,16 @@
     position: fixed; left: 16px; bottom: calc(16px + env(safe-area-inset-bottom, 0px));
     display: flex; flex-direction: column; gap: 2px; pointer-events: none;
   }
-  .caption strong { font-size: 15px; font-weight: 700; letter-spacing: 0.02em; }
-  .caption span { font-size: 12px; color: var(--muted); }
+  .caption strong { font-size: 13px; font-weight: 400; letter-spacing: 0.12em; }
+  .caption span { font-size: 11px; color: var(--muted); letter-spacing: 0.04em; }
   .views {
     position: fixed; right: 16px; top: calc(16px + env(safe-area-inset-top, 0px));
-    display: flex; gap: 4px; padding: 4px; border-radius: 10px;
-    background: var(--panel); box-shadow: 0 1px 3px rgba(0,0,0,0.12);
+    display: flex; gap: 2px; padding: 3px;
+    background: var(--panel); border: 1px solid #dcdcd8;
   }
   .views button {
-    font: inherit; font-size: 13px; color: var(--muted); background: transparent;
-    border: 0; border-radius: 7px; padding: 6px 12px; cursor: pointer;
+    font: inherit; font-size: 12px; letter-spacing: 0.06em; color: var(--muted); background: transparent;
+    border: 0; padding: 6px 12px; cursor: pointer;
   }
   .views button[aria-pressed="true"] { background: var(--fg); color: var(--bg); }
   .views button:focus-visible { outline: 2px solid var(--fg); outline-offset: 2px; }
@@ -45,58 +41,125 @@
   <button type="button" id="view-both" data-mode="both" aria-pressed="false">両方</button>
 </div>
 <div class="caption">
-  <strong>試作 02 — ポーン</strong>
+  <strong>PAWN</strong>
   <span>ドラッグで回転 / ホイール・ピンチで拡大縮小</span>
 </div>
 
 <script type="importmap">
 { "imports": {
   "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
-  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/",
+  "three-mesh-bvh": "https://cdn.jsdelivr.net/npm/three-mesh-bvh@0.7.6/build/index.module.js",
+  "three-bvh-csg": "https://cdn.jsdelivr.net/npm/three-bvh-csg@0.0.16/build/index.module.js"
 } }
 </script>
 <script type="module">
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+import { RoundedBoxGeometry } from "three/addons/geometries/RoundedBoxGeometry.js";
+import { Brush, Evaluator, SUBTRACTION } from "three-bvh-csg";
 
 const stage = document.getElementById("stage");
-const css = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+const BG = 0xededeb;
 
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.05;
 stage.appendChild(renderer.domElement);
 
 const scene = new THREE.Scene();
-const camera = new THREE.PerspectiveCamera(35, 1, 0.1, 100);
-camera.position.set(1.2, 1.9, 5.2);
+scene.background = new THREE.Color(BG);
+const camera = new THREE.PerspectiveCamera(22, 1, 0.1, 100);
+camera.position.set(0, 1.5, 8.2);
 
-// Lighting: soft studio setup
-scene.add(new THREE.HemisphereLight(0xffffff, 0x9aa0a8, 1.2));
-const key = new THREE.DirectionalLight(0xffffff, 2.2);
-key.position.set(3, 6, 4);
+// Lighting: large soft studio key from the front-left, gentle fill and top light
+scene.add(new THREE.HemisphereLight(0xffffff, 0xb8b8b4, 1.3));
+const key = new THREE.DirectionalLight(0xffffff, 1.8);
+key.position.set(-3, 5, 5);
 key.castShadow = true;
 key.shadow.mapSize.set(2048, 2048);
-key.shadow.radius = 6;
+key.shadow.radius = 10;
+key.shadow.bias = -0.0002;
+key.shadow.normalBias = 0.02;
 key.shadow.camera.left = key.shadow.camera.bottom = -3;
 key.shadow.camera.right = key.shadow.camera.top = 3;
 scene.add(key);
-const rim = new THREE.DirectionalLight(0xffffff, 0.8);
-rim.position.set(-4, 3, -3);
-scene.add(rim);
+const fill = new THREE.DirectionalLight(0xffffff, 0.6);
+fill.position.set(4, 2, 3);
+scene.add(fill);
 
-// Materials: white body, slightly smoother face plate, dark eyes
-const white = new THREE.MeshStandardMaterial({ color: 0xf4f4f1, roughness: 0.6, metalness: 0 });
-const faceMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.3, metalness: 0 });
-const eyeMat = new THREE.MeshStandardMaterial({ color: 0x24262b, roughness: 0.4, metalness: 0 });
-const materials = [white, faceMat, eyeMat];
+// Seamless floor: only the shadow is drawn over the backdrop colour
+const floor = new THREE.Mesh(new THREE.PlaneGeometry(30, 30), new THREE.ShadowMaterial({ opacity: 0.18 }));
+floor.rotation.x = -Math.PI / 2;
+floor.receiveShadow = true;
+scene.add(floor);
 
-// Turn a few (radius, height) control points into a smooth lathe profile
-function smoothProfile(points, samples = 56) {
+// Soft contact shadow right under the piece
+function contactShadow() {
+  const c = document.createElement("canvas");
+  c.width = c.height = 256;
+  const ctx = c.getContext("2d");
+  const g = ctx.createRadialGradient(128, 128, 0, 128, 128, 128);
+  g.addColorStop(0, "rgba(0,0,0,0.38)");
+  g.addColorStop(0.45, "rgba(0,0,0,0.16)");
+  g.addColorStop(1, "rgba(0,0,0,0)");
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, 256, 256);
+  const m = new THREE.Mesh(new THREE.PlaneGeometry(1.4, 1.4),
+    new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(c), transparent: true, depthWrite: false }));
+  m.rotation.x = -Math.PI / 2;
+  m.position.y = 0.002;
+  return m;
+}
+scene.add(contactShadow());
+
+// Cast-stone surface: fine procedural grain used as a bump map
+function grainTexture(size = 512) {
+  const c = document.createElement("canvas");
+  c.width = c.height = size;
+  const ctx = c.getContext("2d");
+  const img = ctx.createImageData(size, size);
+  for (let i = 0; i < img.data.length; i += 4) {
+    const v = 128 + (Math.random() - 0.5) * 70;
+    img.data[i] = img.data[i + 1] = img.data[i + 2] = v;
+    img.data[i + 3] = 255;
+  }
+  ctx.putImageData(img, 0, 0);
+  // A few soft blotches for the uneven, poured look
+  for (let i = 0; i < 90; i++) {
+    const x = Math.random() * size, y = Math.random() * size, r = 10 + Math.random() * 50;
+    const g = ctx.createRadialGradient(x, y, 0, x, y, r);
+    const a = Math.random() * 0.12;
+    g.addColorStop(0, Math.random() < 0.5 ? `rgba(0,0,0,${a})` : `rgba(255,255,255,${a})`);
+    g.addColorStop(1, "rgba(128,128,128,0)");
+    ctx.fillStyle = g;
+    ctx.fillRect(x - r, y - r, r * 2, r * 2);
+  }
+  const t = new THREE.CanvasTexture(c);
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  t.repeat.set(5, 3);
+  return t;
+}
+const grain = grainTexture();
+
+// Materials: matte white stone body, smooth porcelain face plate, painted black features
+const stone = new THREE.MeshStandardMaterial({ color: 0xe8e8e4, roughness: 0.92, metalness: 0, bumpMap: grain, bumpScale: 2 });
+const porcelain = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.28, metalness: 0 });
+const gap = new THREE.MeshStandardMaterial({ color: 0x4a4a48, roughness: 1, metalness: 0 });
+const ink = new THREE.MeshStandardMaterial({ color: 0x161616, roughness: 0.5, metalness: 0 });
+const materials = [stone, porcelain, gap, ink];
+
+// The profile is traced from the reference photo in pixels:
+// y is measured down from the top of the crop, feet touch the floor at y = 205.
+const PX = 2.2 / 192;
+const toWorld = ([r, y]) => [r * PX, (205 - y) * PX];
+
+function spline(points, samples) {
   const curve = new THREE.CatmullRomCurve3(points.map(([r, y]) => new THREE.Vector3(r, y, 0)), false, "centripetal");
-  return curve.getPoints(samples).map((v) => new THREE.Vector2(Math.max(0, v.x), v.y));
+  return curve.getPoints(samples).map((v) => [Math.max(0, v.x), v.y]);
 }
 
 function add(parent, geometry, material, { pos = [0, 0, 0], rot = [0, 0, 0], scale = [1, 1, 1] } = {}) {
@@ -110,42 +173,68 @@ function add(parent, geometry, material, { pos = [0, 0, 0], rot = [0, 0, 0], sca
   return mesh;
 }
 
-// Shared parts: hooded face and little feet
-function addFace(parent, { y, hoodR, faceR = 0.3 }) {
-  const faceZ = Math.sqrt(hoodR * hoodR - faceR * faceR) + 0.03;
-  const rimR = faceR + 0.02;
-  // Rim of the hood opening
-  add(parent, new THREE.TorusGeometry(rimR, 0.045, 16, 48), white, { pos: [0, y, faceZ] });
-  // Face plate: a flattened dome sitting inside the opening
-  add(parent, new THREE.SphereGeometry(faceR, 40, 24), faceMat, { pos: [0, y, faceZ - 0.01], scale: [1, 1, 0.32] });
-  const surface = (x, yy) => faceZ - 0.01 + faceR * 0.32 * Math.sqrt(Math.max(0, 1 - (x * x + yy * yy) / (faceR * faceR)));
-  // Eyes: two short vertical slits
-  for (const x of [-0.1, 0.1]) {
-    add(parent, new THREE.CapsuleGeometry(0.03, 0.08, 6, 12), eyeMat, { pos: [x, y + 0.02, surface(x, 0.02)], scale: [1, 1, 0.5] });
-  }
-  // Mouth: a tiny dash between the eyes
-  add(parent, new THREE.CapsuleGeometry(0.016, 0.04, 4, 8), eyeMat, { pos: [0, y - 0.07, surface(0, -0.07)], rot: [0, 0, Math.PI / 2], scale: [1, 1, 0.5] });
+// Cut a recessed oval opening into the front of the hood (boolean subtraction)
+const csg = new Evaluator();
+csg.useGroups = false;
+function cutFaceOpening(geometry, { cy, rx, ry, depthZ }) {
+  const cutter = new THREE.CylinderGeometry(1, 1, 1, 96);
+  cutter.rotateX(Math.PI / 2);
+  cutter.scale(rx, ry, 2);
+  cutter.translate(0, cy, depthZ + 1);
+  const result = csg.evaluate(new Brush(geometry), new Brush(cutter), SUBTRACTION);
+  return result.geometry;
 }
 
-function addFeet(parent, { spread = 0.2 } = {}) {
-  for (const x of [-spread, spread]) {
-    add(parent, new THREE.SphereGeometry(1, 24, 16), white, { pos: [x, 0.075, 0.4], scale: [0.12, 0.075, 0.2] });
+// Face: oval porcelain plate, a dark gap around it, round eyes and a vertical nose line
+function addFace(parent, { cy, rx, ry, depthZ, plateZ }) {
+  add(parent, new THREE.CircleGeometry(1, 64), gap, { pos: [0, cy, depthZ + 0.002], scale: [rx + 1.5 * PX, ry + 1.5 * PX, 1] });
+  const plate = add(parent, new THREE.CylinderGeometry(1, 1, 1, 64), porcelain, {
+    pos: [0, cy, plateZ - 0.01], rot: [Math.PI / 2, 0, 0], scale: [rx, 0.06, ry],
+  });
+  plate.castShadow = false;
+  const front = plateZ + 0.021;
+  for (const x of [-12, 12]) {
+    add(parent, new THREE.CircleGeometry(3.8 * PX, 32), ink, { pos: [x * PX, cy + 1.5 * PX, front] });
+  }
+  const nose = new THREE.Shape();
+  const w = 1.4 * PX, h = 6.5 * PX;
+  nose.absarc(0, h - w, w, 0, Math.PI, false);
+  nose.absarc(0, -h + w, w, Math.PI, Math.PI * 2, false);
+  add(parent, new THREE.ShapeGeometry(nose, 12), ink, { pos: [0, cy + 0.5 * PX, front] });
+}
+
+// Feet: two blocky, slightly splayed feet peeking out under the hem
+function addFeet(parent, { spread, width, depth, height }) {
+  for (const s of [-1, 1]) {
+    add(parent, new RoundedBoxGeometry(width, height, depth, 3, 0.035), stone, {
+      pos: [s * spread, height / 2, 0.1], rot: [0, s * 0.12, 0],
+    });
   }
 }
 
-// Pawn: hooded head, narrow neck, bell-shaped body with a band near the hem
 function makePawn() {
   const g = new THREE.Group();
-  const profile = smoothProfile([
-    [0, 0.15], [0.5, 0.15], [0.6, 0.17], [0.62, 0.23], [0.58, 0.32], [0.53, 0.48],
-    [0.48, 0.7], [0.43, 0.95], [0.39, 1.15], [0.38, 1.26],
-    [0.44, 1.37], [0.51, 1.52], [0.53, 1.66], [0.5, 1.83], [0.39, 1.98], [0.2, 2.07], [0, 2.09],
-  ]);
-  add(g, new THREE.LatheGeometry(profile, 40), white);
-  // Band around the hem
-  add(g, new THREE.TorusGeometry(0.535, 0.022, 12, 64), white, { pos: [0, 0.46, 0], rot: [Math.PI / 2, 0, 0] });
-  addFace(g, { y: 1.64, hoodR: 0.53 });
-  addFeet(g);
+  const head = spline([
+    [0, 13], [12, 14.2], [17.5, 16], [25, 20], [29, 24], [33, 28], [35.5, 32], [37.5, 36], [39, 40],
+    [40.5, 48], [40.5, 56], [39, 64], [37, 72], [35, 76], [32, 80], [30.5, 84], [28.5, 92],
+    [27, 100], [26, 108], [25.5, 118], [25.7, 126], [26.3, 130.6],
+  ], 90);
+  // Raised band: a flat strip with crisp edges
+  const band = [[26.5, 131.2], [27.7, 131.9], [28.2, 143.1], [27.8, 143.9], [28.3, 144.4]];
+  const skirt = spline([
+    [28.6, 145], [30.5, 152], [33, 160], [36, 168], [39.5, 176], [42.5, 183], [43.8, 187], [43.6, 189.5], [42.6, 191],
+  ], 40);
+  const profile = [...head, ...band, ...skirt, [30, 191.2], [0, 191.2]]
+    .map(toWorld).map(([r, y]) => new THREE.Vector2(r, y))
+    .reverse(); // lathe expects bottom-to-top so the faces point outward
+
+  const lathe = new THREE.LatheGeometry(profile, 96);
+  const face = { cy: (205 - 59) * PX, rx: 26 * PX, ry: 25 * PX };
+  const depthZ = 24 * PX;
+  const bodyGeo = cutFaceOpening(lathe, { cy: face.cy, rx: face.rx + 1.5 * PX, ry: face.ry + 1.5 * PX, depthZ });
+  add(g, bodyGeo, stone);
+  addFace(g, { ...face, depthZ, plateZ: depthZ + 1 * PX });
+  addFeet(g, { spread: 19.5 * PX, width: 20 * PX, depth: 24 * PX, height: 20 * PX });
   return g;
 }
 
@@ -153,7 +242,7 @@ const piece = makePawn();
 scene.add(piece);
 
 // Wireframe overlay (edges of every mesh)
-const wireMat = new THREE.LineBasicMaterial({ transparent: true, opacity: 0.45 });
+const wireMat = new THREE.LineBasicMaterial({ color: 0x2a2a28, transparent: true, opacity: 0.4 });
 const wires = [];
 piece.traverse((o) => {
   if (!o.isMesh) return;
@@ -174,31 +263,14 @@ document.querySelectorAll(".views button").forEach((b) => {
   b.addEventListener("click", () => setMode(b.dataset.mode));
 });
 
-// Floor
-const floorMat = new THREE.MeshStandardMaterial({ roughness: 1 });
-const floor = new THREE.Mesh(new THREE.CircleGeometry(6, 64), floorMat);
-floor.rotation.x = -Math.PI / 2;
-floor.receiveShadow = true;
-scene.add(floor);
-
-function applyTheme() {
-  scene.background = new THREE.Color(css("--bg"));
-  floorMat.color.set(css("--floor"));
-  wireMat.color.set(css("--fg"));
-  scene.fog = new THREE.Fog(scene.background, 7, 14);
-}
-applyTheme();
-matchMedia("(prefers-color-scheme: dark)").addEventListener("change", applyTheme);
-new MutationObserver(applyTheme).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
-
 const controls = new OrbitControls(camera, renderer.domElement);
-controls.target.set(0, 1.05, 0);
+controls.target.set(0, 1.1, 0);
 controls.enableDamping = true;
 controls.minDistance = 2.5;
-controls.maxDistance = 10;
+controls.maxDistance = 16;
 controls.maxPolarAngle = Math.PI * 0.49;
 controls.autoRotate = !matchMedia("(prefers-reduced-motion: reduce)").matches;
-controls.autoRotateSpeed = 1.2;
+controls.autoRotateSpeed = 0.6;
 controls.addEventListener("start", () => { controls.autoRotate = false; });
 
 function resize() {
