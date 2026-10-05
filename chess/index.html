@@ -468,63 +468,69 @@ function polygonField(points, { min, max, step }) {
 const smoothLoop = (pts, samples) => new THREE.CatmullRomCurve3(pts.map(([x, y]) => new THREE.Vector3(x, y, 0)), true, "centripetal")
   .getPoints(samples).slice(0, -1).map((v) => [v.x, v.y]); // drop the repeated closing point
 
-// Knight: a classic Staunton-style horse head, traced from a reference side view so the profile
-// reads as a horse. The outline is given thickness with rounded edges; two ears stand on top;
-// the set's mask sits in a milled pocket low on the neck, on the side facing the viewer.
+// Knight: a classic Staunton-style horse head, traced from a reference side view.
+// The head and neck are a straight-edged outline (crisp planes, like a carved piece) given
+// thickness; the mane is a separate thin blade along the back, and the two ears stand either
+// side of it. The set's mask sits in a milled pocket low on the neck, on the side facing the viewer.
 function makeKnight() {
   const g = new THREE.Group();
   // Reference outline in its own image pixels (horse facing right), mapped to piece pixels:
   // mirrored so the muzzle points to -x, scaled, and stood on the collar at y = 33.
   const S = 0.284, OX = 510, OY = 690, BASE = 33;
   const map = ([X, Y]) => [-(X - OX) * S, BASE + (OY - Y) * S];
-  const horse = smoothLoop([
-    [612, 690], [624, 630], [628, 570], [620, 505], [600, 445], [572, 372],
-    [610, 392], [655, 420], [690, 440], [720, 432], [745, 408], [756, 376], [748, 344], [725, 315],
-    [695, 275], [660, 228], [632, 190], [612, 160], [590, 135], [560, 118], [520, 106], [470, 104],
-    [420, 108], [375, 118], [355, 140], [345, 152], [351, 162], [337, 184], [343, 193], [329, 216],
-    [336, 226], [322, 250], [329, 260], [316, 286], [312, 330], [314, 390], [325, 460], [348, 535],
-    [382, 605], [415, 660], [425, 690],
-  ].map(map), 360);
-  const horseD = polygonField(horse, { min: [-75, 25], max: [65, 215], step: 0.35 });
+  // Head and neck: straight segments only
+  const body = [
+    [614, 690], [628, 610], [626, 530], [606, 465], [578, 392],
+    [640, 418], [690, 440], [722, 436], [748, 410], [754, 376], [738, 340],
+    [690, 268], [642, 196], [606, 150], [560, 140],
+    [500, 160], [440, 196], [398, 250], [374, 330], [372, 420], [384, 520], [408, 610], [428, 690],
+  ].map(map);
+  // Mane: a blade along the back, its inner edge buried in the neck; notched teeth up top
+  const mane = [
+    [600, 128], [548, 104], [470, 102], [404, 114], [372, 138],
+    [360, 158], [366, 166], [350, 190], [356, 198], [340, 224], [346, 232], [330, 262],
+    [320, 330], [322, 420], [338, 492], [366, 548],
+    [394, 536], [384, 420], [386, 330], [408, 254], [448, 204], [504, 168], [566, 150], [604, 150],
+  ].map(map);
+  const bodyD = polygonField(body, { min: [-75, 25], max: [65, 215], step: 0.35 });
+  const maneD = polygonField(mane, { min: [-40, 40], max: [65, 215], step: 0.35 });
   // half thickness: broad lower neck, slimmer head, tapering toward the muzzle
   const halfW = (x, y) => {
-    let w = THREE.MathUtils.lerp(20, 13.5, THREE.MathUtils.clamp((y - 105) / 50, 0, 1));
-    w -= THREE.MathUtils.clamp((-x - 40) / 24, 0, 1) * 2.5;
+    let w = THREE.MathUtils.lerp(20, 13, THREE.MathUtils.smootherstep(y, 95, 165));
+    w -= THREE.MathUtils.smootherstep(-x, 38, 64) * 2.5;
     return w;
   };
+  const maneHalf = 4.2;
   const extrude = (d2, z, h, r) => {
     const wx = d2 + r, wz = Math.abs(z) - h + r;
     return Math.min(Math.max(wx, wz), 0) + Math.hypot(Math.max(wx, 0), Math.max(wz, 0)) - r;
   };
-  // tapered ear: a capsule from base (bx, by) to tip (tx, ty) whose radius shrinks toward the tip
-  const ear = (x, y, z, bx, by, tx, ty, ez, r0, r1) => {
-    const ax = tx - bx, ay = ty - by, px = x - bx, py = y - by;
-    const t = Math.min(Math.max((px * ax + py * ay) / (ax * ax + ay * ay), 0), 1);
-    return Math.hypot(px - ax * t, py - ay * t, z - ez) - THREE.MathUtils.lerp(r0, r1, t);
+  // ear: a tapered capsule from base to tip, leaning outward so the pair frames the mane
+  const ear = (x, y, z, b, t, r0, r1) => {
+    const ax = t[0] - b[0], ay = t[1] - b[1], az = t[2] - b[2];
+    const px = x - b[0], py = y - b[1], pz = z - b[2];
+    const k = Math.min(Math.max((px * ax + py * ay + pz * az) / (ax * ax + ay * ay + az * az), 0), 1);
+    return Math.hypot(px - ax * k, py - ay * k, pz - az * k) - THREE.MathUtils.lerp(r0, r1, k);
   };
-  const face = { cx: 2, cy: 76, floorZ: 15, lip: 2 };
+  const [ebx, eby] = map([588, 150]), [etx, ety] = map([604, 86]);
+  const face = { cx: 1, cy: 74, floorZ: 15, lip: 2 };
   const f = (x, y, z) => {
     // round base: two discs with a groove, and a squat collar
     let d = sd.cyl(x, y, z, 44, 0, 10, 2.5);
     d = sd.smin(d, sd.cyl(x, y, z, 43, 11, 22, 3.5), 1);
     d = sd.smin(d, sd.cyl(x, y, z, 31, 21, 34, 5), 3);
-    // horse
-    d = sd.smin(d, extrude(horseD(x, y), z, halfW(x, y), 4.5), 3);
-    for (const ez of [-6.5, 6.5]) d = sd.smin(d, ear(x, y, z, -22, 186, -28, 206, ez, 5.5, 1.6), 3);
+    // head and neck, mane blade, ears either side of the mane
+    d = sd.smin(d, extrude(bodyD(x, y), z, halfW(x, y), 3), 2);
+    d = sd.smin(d, extrude(maneD(x, y), z, maneHalf, 1.2), 1.5);
+    for (const s of [-1, 1]) {
+      d = sd.smin(d, ear(x, y, z, [ebx, eby, s * 7], [etx, ety, s * 10.5], 4.8, 1.4), 2);
+    }
     return faceOpening(d, x, y, z, face);
   };
-  const geo = meshSDF(f, { min: [-72, -2, -46], max: [60, 212, 46], step: 0.65 });
+  const geo = meshSDF(f, { min: [-72, -2, -46], max: [60, 216, 46], step: 0.6 });
   geo.scale(PX, PX, PX);
   add(g, geo, stone);
   addMask(g, face);
-  // pressed-in eyes on both sides of the head, in the set's ink colour
-  const [ex, ey] = map([618, 215]);
-  for (const s of [-1, 1]) {
-    const eye = add(g, new THREE.SphereGeometry(2.6 * PX, 20, 14), ink, {
-      pos: [ex * PX, ey * PX, s * (halfW(ex, ey) - 0.6) * PX], scale: [1.25, 1, 0.5],
-    });
-    eye.castShadow = false;
-  }
   return g;
 }
 
