@@ -469,41 +469,48 @@ const smoothLoop = (pts, samples) => new THREE.CatmullRomCurve3(pts.map(([x, y])
   .getPoints(samples).slice(0, -1).map((v) => [v.x, v.y]); // drop the repeated closing point
 
 // Knight: a classic Staunton-style horse head, traced from a reference side view.
-// The head and neck are a straight-edged outline (crisp planes, like a carved piece) given
-// thickness; the mane is a separate thin blade along the back, and the two ears stand either
-// side of it. The set's mask sits in a milled pocket low on the neck, on the side facing the viewer.
+// The traced outline is smoothed into curves, then given a sculpted thickness: a round, pillowy
+// cross-section that falls away toward the outline, a slim muzzle, full cheeks (the jaw),
+// a slight brow, a narrower throat and a heavy lower neck. The mane is a thin curved blade along
+// the back with the two ears standing either side of it. The set's mask sits low on the neck.
 function makeKnight() {
   const g = new THREE.Group();
   // Reference outline in its own image pixels (horse facing right), mapped to piece pixels:
   // mirrored so the muzzle points to -x, scaled, and stood on the collar at y = 33.
   const S = 0.284, OX = 510, OY = 690, BASE = 33;
   const map = ([X, Y]) => [-(X - OX) * S, BASE + (OY - Y) * S];
-  // Head and neck: straight segments only
-  const body = [
-    [614, 690], [628, 610], [626, 530], [606, 465], [578, 392],
+  const body = smoothLoop([
+    [614, 690], [628, 610], [626, 530], [606, 465], [580, 400], [596, 398],
     [640, 418], [690, 440], [722, 436], [748, 410], [754, 376], [738, 340],
-    [690, 268], [642, 196], [606, 150], [560, 140],
+    [690, 268], [642, 196], [606, 152], [560, 140],
     [500, 160], [440, 196], [398, 250], [374, 330], [372, 420], [384, 520], [408, 610], [428, 690],
-  ].map(map);
-  // Mane: a blade along the back, its inner edge buried in the neck; notched teeth up top
-  const mane = [
-    [600, 128], [548, 104], [470, 102], [404, 114], [372, 138],
-    [360, 158], [366, 166], [350, 190], [356, 198], [340, 224], [346, 232], [330, 262],
+  ].map(map), 300);
+  const mane = smoothLoop([
+    [600, 130], [548, 106], [470, 103], [404, 116], [370, 142],
+    [356, 168], [348, 196], [338, 228], [328, 266],
     [320, 330], [322, 420], [338, 492], [366, 548],
-    [394, 536], [384, 420], [386, 330], [408, 254], [448, 204], [504, 168], [566, 150], [604, 150],
-  ].map(map);
+    [394, 536], [384, 420], [386, 330], [408, 254], [448, 204], [504, 168], [566, 150], [604, 152],
+  ].map(map), 220);
   const bodyD = polygonField(body, { min: [-75, 25], max: [65, 215], step: 0.35 });
   const maneD = polygonField(mane, { min: [-40, 40], max: [65, 215], step: 0.35 });
-  // half thickness: broad lower neck, slimmer head, tapering toward the muzzle
+  const ss = THREE.MathUtils.smootherstep;
+  const bump = (x, y, cx, cy, rx, ry) => Math.exp(-(((x - cx) / rx) ** 2 + ((y - cy) / ry) ** 2));
+  // Sculpted half thickness of the head and neck
   const halfW = (x, y) => {
-    let w = THREE.MathUtils.lerp(20, 13, THREE.MathUtils.smootherstep(y, 95, 165));
-    w -= THREE.MathUtils.smootherstep(-x, 38, 64) * 2.5;
+    let w = THREE.MathUtils.lerp(19, 12, ss(y, 95, 160)); // heavy lower neck -> slimmer head
+    w -= ss(-x, 34, 62) * 5.6;                           // muzzle narrows toward the nose
+    w += 1.3 * bump(x, y, -61, 128, 5, 6);               // slight flare at the nostrils
+    w += 6.5 * bump(x, y, -24, 135, 9.5, 9);             // full, round cheeks / jaw
+    w += 1.6 * bump(x, y, -31, 165, 6, 4);               // brow over the eye
+    w -= 2.5 * bump(x, y, -24, 104, 8, 10);              // throat under the jaw
+    w += 1.5 * bump(x, y, 4, 165, 14, 18);               // crest of the neck behind the head
     return w;
   };
-  const maneHalf = 4.2;
-  const extrude = (d2, z, h, r) => {
-    const wx = d2 + r, wz = Math.abs(z) - h + r;
-    return Math.min(Math.max(wx, wz), 0) + Math.hypot(Math.max(wx, 0), Math.max(wz, 0)) - r;
+  // Inflate an outline: full thickness inside, rounding off over `edge` toward the outline
+  const inflate = (d2, z, h, edge) => {
+    const t = Math.min(Math.max(-d2 / edge, 0), 1);
+    const zext = h * (1 - (1 - t) ** 3);
+    return Math.max(d2, (Math.abs(z) - zext) * 0.8);
   };
   // ear: a tapered capsule from base to tip, leaning outward so the pair frames the mane
   const ear = (x, y, z, b, t, r0, r1) => {
@@ -512,18 +519,18 @@ function makeKnight() {
     const k = Math.min(Math.max((px * ax + py * ay + pz * az) / (ax * ax + ay * ay + az * az), 0), 1);
     return Math.hypot(px - ax * k, py - ay * k, pz - az * k) - THREE.MathUtils.lerp(r0, r1, k);
   };
-  const [ebx, eby] = map([588, 150]), [etx, ety] = map([604, 86]);
-  const face = { cx: 1, cy: 74, floorZ: 15, lip: 2 };
+  const [ebx, eby] = map([588, 152]), [etx, ety] = map([604, 86]);
+  const face = { cx: 1, cy: 74, floorZ: 14, lip: 2 };
   const f = (x, y, z) => {
     // round base: two discs with a groove, and a squat collar
     let d = sd.cyl(x, y, z, 44, 0, 10, 2.5);
     d = sd.smin(d, sd.cyl(x, y, z, 43, 11, 22, 3.5), 1);
     d = sd.smin(d, sd.cyl(x, y, z, 31, 21, 34, 5), 3);
     // head and neck, mane blade, ears either side of the mane
-    d = sd.smin(d, extrude(bodyD(x, y), z, halfW(x, y), 3), 2);
-    d = sd.smin(d, extrude(maneD(x, y), z, maneHalf, 1.2), 1.5);
+    d = sd.smin(d, inflate(bodyD(x, y), z, halfW(x, y), 9), 3);
+    d = sd.smin(d, inflate(maneD(x, y), z, 4.2, 2.5), 2);
     for (const s of [-1, 1]) {
-      d = sd.smin(d, ear(x, y, z, [ebx, eby, s * 7], [etx, ety, s * 10.5], 4.8, 1.4), 2);
+      d = sd.smin(d, ear(x, y, z, [ebx, eby, s * 7], [etx, ety, s * 10.5], 4.8, 1.4), 2.5);
     }
     return faceOpening(d, x, y, z, face);
   };
