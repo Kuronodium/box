@@ -33,6 +33,13 @@
   .views button:focus-visible { outline: 2px solid var(--fg); outline-offset: 2px; }
   .pieces { right: auto; left: 16px; }
   .sides { right: auto; left: 16px; top: calc(60px + env(safe-area-inset-top, 0px)); }
+  .swatches {
+    position: fixed; left: 16px; top: calc(104px + env(safe-area-inset-top, 0px));
+    display: flex; flex-direction: column; gap: 6px; padding: 8px 10px;
+    background: var(--panel); border: 1px solid #dcdcd8; font-size: 12px; letter-spacing: 0.06em;
+  }
+  .swatches label { display: flex; align-items: center; justify-content: space-between; gap: 12px; color: var(--fg); }
+  .swatches input { width: 36px; height: 22px; padding: 0; border: 1px solid #dcdcd8; background: none; cursor: pointer; }
 </style>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Zen+Kaku+Gothic+New:wght@400;700&display=swap">
 
@@ -49,6 +56,12 @@
 <div class="views sides" role="group" aria-label="先手・後手">
   <button type="button" id="side-white" data-side="white" aria-pressed="true">白</button>
   <button type="button" id="side-black" data-side="black" aria-pressed="false">黒</button>
+  <button type="button" id="side-custom" data-side="custom" aria-pressed="false">カスタム</button>
+</div>
+<div class="swatches" id="swatches" hidden>
+  <label for="color-stone">本体 <input type="color" id="color-stone" data-part="stone" value="#ebebe8"></label>
+  <label for="color-porcelain">お面 <input type="color" id="color-porcelain" data-part="porcelain" value="#ffffff"></label>
+  <label for="color-ink">目と鼻 <input type="color" id="color-ink" data-part="ink" value="#1c1c1c"></label>
 </div>
 <div class="caption">
   <strong id="piece-name">ROOK</strong>
@@ -475,16 +488,29 @@ const palettes = {
   white: { stone: [0xebebe8, 0.85], porcelain: [0xffffff, 0.35], ink: [0x1c1c1c, 0.6] },
   black: { stone: [0x3a3a3c, 0.7], porcelain: [0x2c2c2e, 0.4], ink: [0xf0f0ec, 0.6] },
 };
+// Custom colours start from whichever preset was showing and are edited per part
+const parts = { stone, porcelain, ink };
+const swatches = document.getElementById("swatches");
+const hex = (n) => "#" + n.toString(16).padStart(6, "0");
+let current = "white";
 function setSide(side) {
-  const p = palettes[side];
-  for (const [m, key] of [[stone, "stone"], [porcelain, "porcelain"], [ink, "ink"]]) {
-    m.color.setHex(p[key][0]);
-    m.roughness = p[key][1];
+  if (side !== "custom") {
+    const p = palettes[side];
+    for (const key of Object.keys(parts)) {
+      parts[key].color.setHex(p[key][0]);
+      parts[key].roughness = p[key][1];
+      document.getElementById(`color-${key}`).value = hex(p[key][0]);
+    }
   }
+  current = side;
+  swatches.hidden = side !== "custom";
   document.querySelectorAll("[data-side]").forEach((b) => {
     b.setAttribute("aria-pressed", String(b.dataset.side === side));
   });
 }
+swatches.querySelectorAll("input[type=color]").forEach((input) => {
+  input.addEventListener("input", () => parts[input.dataset.part].color.set(input.value));
+});
 document.querySelectorAll("[data-side]").forEach((b) => {
   b.addEventListener("click", () => setSide(b.dataset.side));
 });
