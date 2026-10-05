@@ -256,8 +256,8 @@ function makePawn() {
   const g = new THREE.Group();
 
   // Head: a clean sphere (the photo's head is softened into a round one), merged into the neck
-  const R = 42, headY = 54; // px
-  const neckR = (y) => THREE.MathUtils.lerp(24.6, 26.3, THREE.MathUtils.clamp((y - 96) / (130.6 - 96), 0, 1));
+  const R = 42, headY = 62; // px (neck shortened from the photo by 8px)
+  const neckR = (y) => THREE.MathUtils.lerp(24.6, 26.3, THREE.MathUtils.clamp((y - 104) / (130.6 - 104), 0, 1));
   const headNeck = headNeckOutline({ R, headY, neckR, neckBottomY: 130.6, blend: 9 });
   // Raised band: stands proud of both the neck and the top of the skirt, with slightly rounded edges
   const band = [[27, 131], [30.4, 131.3], [31.3, 132.2], [31.5, 137.5], [31.3, 142.8], [30.4, 143.7], [28.4, 144]];
