@@ -116,43 +116,13 @@ function contactShadow() {
 }
 scene.add(contactShadow());
 
-// Cast-stone surface: fine procedural grain used as a bump map
-function grainTexture(size = 512) {
-  const c = document.createElement("canvas");
-  c.width = c.height = size;
-  const ctx = c.getContext("2d");
-  const img = ctx.createImageData(size, size);
-  for (let i = 0; i < img.data.length; i += 4) {
-    const v = 128 + (Math.random() - 0.5) * 70;
-    img.data[i] = img.data[i + 1] = img.data[i + 2] = v;
-    img.data[i + 3] = 255;
-  }
-  ctx.putImageData(img, 0, 0);
-  // A few soft blotches for the uneven, poured look
-  for (let i = 0; i < 90; i++) {
-    const x = Math.random() * size, y = Math.random() * size, r = 10 + Math.random() * 50;
-    const g = ctx.createRadialGradient(x, y, 0, x, y, r);
-    const a = Math.random() * 0.12;
-    g.addColorStop(0, Math.random() < 0.5 ? `rgba(0,0,0,${a})` : `rgba(255,255,255,${a})`);
-    g.addColorStop(1, "rgba(128,128,128,0)");
-    ctx.fillStyle = g;
-    ctx.fillRect(x - r, y - r, r * 2, r * 2);
-  }
-  const t = new THREE.CanvasTexture(c);
-  t.wrapS = t.wrapT = THREE.RepeatWrapping;
-  t.repeat.set(5, 3);
-  return t;
-}
-const grain = grainTexture();
+// Materials: plain matte white body, slightly glossier mask, dark recessed features
+const stone = new THREE.MeshStandardMaterial({ color: 0xebebe8, roughness: 0.85, metalness: 0 });
+const porcelain = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.35, metalness: 0 });
+const ink = new THREE.MeshStandardMaterial({ color: 0x1c1c1c, roughness: 0.6, metalness: 0 });
+const materials = [stone, porcelain, ink];
 
-// Materials: matte white stone body, smooth porcelain face plate, painted black features
-const stone = new THREE.MeshStandardMaterial({ color: 0xe8e8e4, roughness: 0.92, metalness: 0, bumpMap: grain, bumpScale: 2 });
-const porcelain = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.28, metalness: 0 });
-const gap = new THREE.MeshStandardMaterial({ color: 0x4a4a48, roughness: 1, metalness: 0 });
-const ink = new THREE.MeshStandardMaterial({ color: 0x161616, roughness: 0.5, metalness: 0 });
-const materials = [stone, porcelain, gap, ink];
-
-// The profile is traced from the reference photo in pixels:
+// Proportions are traced from the reference photo in pixels:
 // y is measured down from the top of the crop, feet touch the floor at y = 205.
 const PX = 2.2 / 192;
 const toWorld = ([r, y]) => [r * PX, (205 - y) * PX];
@@ -173,34 +143,62 @@ function add(parent, geometry, material, { pos = [0, 0, 0], rot = [0, 0, 0], sca
   return mesh;
 }
 
-// Cut a recessed oval opening into the front of the hood (boolean subtraction)
 const csg = new Evaluator();
-csg.useGroups = false;
-function cutFaceOpening(geometry, { cy, rx, ry, depthZ }) {
-  const cutter = new THREE.CylinderGeometry(1, 1, 1, 96);
-  cutter.rotateX(Math.PI / 2);
-  cutter.scale(rx, ry, 2);
-  cutter.translate(0, cy, depthZ + 1);
-  const result = csg.evaluate(new Brush(geometry), new Brush(cutter), SUBTRACTION);
-  return result.geometry;
+csg.useGroups = true;
+
+// Round hooded head, built as a surface of revolution around the face axis (+z):
+// sphere -> rounded lip -> inner wall -> floor. The lip fillet keeps the rim soft.
+function hoodGeometry({ R, openR, lip, depth }) {
+  const cR = openR + lip;                       // fillet centre, radial
+  const cZ = Math.sqrt((R - lip) ** 2 - cR ** 2); // fillet centre, along the face axis
+  const startA = Math.atan2(cZ, cR);             // where the fillet meets the sphere
+  const pts = [];
+  // Sphere from the back pole up to the fillet
+  const sphereSteps = 72;
+  for (let i = 0; i <= sphereSteps; i++) {
+    const a = -Math.PI / 2 + (startA + Math.PI / 2) * (i / sphereSteps);
+    pts.push(new THREE.Vector2(R * Math.cos(a), R * Math.sin(a)));
+  }
+  // Rounded lip rolling into the opening
+  const lipSteps = 16;
+  for (let i = 1; i <= lipSteps; i++) {
+    const a = startA + (Math.PI - startA) * (i / lipSteps);
+    pts.push(new THREE.Vector2(cR + lip * Math.cos(a), cZ + lip * Math.sin(a)));
+  }
+  // Inner wall and floor
+  pts.push(new THREE.Vector2(openR, cZ - depth));
+  pts.push(new THREE.Vector2(0, cZ - depth));
+  const geo = new THREE.LatheGeometry(pts, 96);
+  geo.rotateX(Math.PI / 2); // lathe axis y -> face axis z
+  return { geo, rimZ: cZ };
 }
 
-// Face: oval porcelain plate, a dark gap around it, round eyes and a vertical nose line
-function addFace(parent, { cy, rx, ry, depthZ, plateZ }) {
-  add(parent, new THREE.CircleGeometry(1, 64), gap, { pos: [0, cy, depthZ + 0.002], scale: [rx + 1.5 * PX, ry + 1.5 * PX, 1] });
-  const plate = add(parent, new THREE.CylinderGeometry(1, 1, 1, 64), porcelain, {
-    pos: [0, cy, plateZ - 0.01], rot: [Math.PI / 2, 0, 0], scale: [rx, 0.06, ry],
-  });
-  plate.castShadow = false;
-  const front = plateZ + 0.021;
-  for (const x of [-12, 12]) {
-    add(parent, new THREE.CircleGeometry(3.8 * PX, 32), ink, { pos: [x * PX, cy + 1.5 * PX, front] });
+// Mask: a gently domed disc with eyes and a nose line pressed into it
+function maskMesh({ r, z0, bulge }) {
+  const domeGeo = new THREE.SphereGeometry(1, 64, 48);
+  domeGeo.scale(r, r, bulge);
+  domeGeo.translate(0, 0, z0);
+  const surfaceZ = (x, y) => z0 + bulge * Math.sqrt(Math.max(0, 1 - (x * x + y * y) / (r * r)));
+
+  let result = new Brush(domeGeo, porcelain);
+  const press = (geo) => {
+    result.updateMatrixWorld();
+    const tool = new Brush(geo, ink);
+    tool.updateMatrixWorld();
+    result = csg.evaluate(result, tool, SUBTRACTION);
+  };
+  const eyeR = 4.2 * PX;
+  for (const x of [-12 * PX, 12 * PX]) {
+    const y = 1.5 * PX;
+    press(new THREE.SphereGeometry(eyeR, 24, 16).translate(x, y, surfaceZ(x, y) + eyeR * 0.45));
   }
-  const nose = new THREE.Shape();
-  const w = 1.4 * PX, h = 6.5 * PX;
-  nose.absarc(0, h - w, w, 0, Math.PI, false);
-  nose.absarc(0, -h + w, w, Math.PI, Math.PI * 2, false);
-  add(parent, new THREE.ShapeGeometry(nose, 12), ink, { pos: [0, cy + 0.5 * PX, front] });
+  const noseR = 1.8 * PX;
+  const noseY = 0.5 * PX;
+  press(new THREE.CapsuleGeometry(noseR, 10 * PX, 6, 12).translate(0, noseY, surfaceZ(0, noseY) + noseR * 0.2));
+
+  const mesh = new THREE.Mesh(result.geometry, result.material);
+  mesh.castShadow = mesh.receiveShadow = true;
+  return mesh;
 }
 
 // Feet: two blocky, slightly splayed feet peeking out under the hem
@@ -214,26 +212,37 @@ function addFeet(parent, { spread, width, depth, height }) {
 
 function makePawn() {
   const g = new THREE.Group();
-  const head = spline([
-    [0, 13], [12, 14.2], [17.5, 16], [25, 20], [29, 24], [33, 28], [35.5, 32], [37.5, 36], [39, 40],
-    [40.5, 48], [40.5, 56], [39, 64], [37, 72], [35, 76], [32, 80], [30.5, 84], [28.5, 92],
-    [27, 100], [26, 108], [25.5, 118], [25.7, 126], [26.3, 130.6],
-  ], 90);
+
+  // Head: a clean sphere (the photo's head is softened into a round one)
+  const R = 42, headY = 54; // px
+  // Neck: a straight column that rolls into the sphere through a concave fillet
+  const neckR = 25, F = 8;
+  const cR = neckR + F, cY = headY + Math.sqrt((R + F) ** 2 - cR ** 2);
+  const a1 = Math.atan2(headY - cY, -cR);
+  const fillet = [];
+  for (let i = 0; i <= 16; i++) {
+    const a = a1 + (-Math.PI - a1) * (i / 16);
+    fillet.push([cR + F * Math.cos(a), cY + F * Math.sin(a)]);
+  }
+  const column = spline([[neckR, cY], [25.2, 108], [25.6, 120], [26.3, 130.6]], 30).slice(1);
+  const neck = [...fillet, ...column];
   // Raised band: a flat strip with crisp edges
   const band = [[26.5, 131.2], [27.7, 131.9], [28.2, 143.1], [27.8, 143.9], [28.3, 144.4]];
   const skirt = spline([
     [28.6, 145], [30.5, 152], [33, 160], [36, 168], [39.5, 176], [42.5, 183], [43.8, 187], [43.6, 189.5], [42.6, 191],
   ], 40);
-  const profile = [...head, ...band, ...skirt, [30, 191.2], [0, 191.2]]
+  const profile = [...neck, ...band, ...skirt, [30, 191.2], [0, 191.2]]
     .map(toWorld).map(([r, y]) => new THREE.Vector2(r, y))
     .reverse(); // lathe expects bottom-to-top so the faces point outward
+  add(g, new THREE.LatheGeometry(profile, 96), stone);
 
-  const lathe = new THREE.LatheGeometry(profile, 96);
-  const face = { cy: (205 - 59) * PX, rx: 26 * PX, ry: 25 * PX };
-  const depthZ = 24 * PX;
-  const bodyGeo = cutFaceOpening(lathe, { cy: face.cy, rx: face.rx + 1.5 * PX, ry: face.ry + 1.5 * PX, depthZ });
-  add(g, bodyGeo, stone);
-  addFace(g, { ...face, depthZ, plateZ: depthZ + 1 * PX });
+  const head = new THREE.Group();
+  head.position.y = (205 - headY) * PX;
+  g.add(head);
+  const { geo, rimZ } = hoodGeometry({ R: R * PX, openR: 25 * PX, lip: 3.5 * PX, depth: 9 * PX });
+  add(head, geo, stone);
+  head.add(maskMesh({ r: 23.7 * PX, z0: rimZ - 5 * PX, bulge: 10 * PX }));
+
   addFeet(g, { spread: 19.5 * PX, width: 20 * PX, depth: 24 * PX, height: 20 * PX });
   return g;
 }
