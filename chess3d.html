@@ -594,13 +594,16 @@
 <script type="importmap">
 { "imports": {
   "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
-  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/",
+  "three-mesh-bvh": "https://cdn.jsdelivr.net/npm/three-mesh-bvh@0.7.6/build/index.module.js",
+  "three-bvh-csg": "https://cdn.jsdelivr.net/npm/three-bvh-csg@0.0.16/build/index.module.js"
 } }
 </script>
 <script type="module">
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+import { Brush, Evaluator, SUBTRACTION } from 'three-bvh-csg';
 
 const C = window.Chess;
 
@@ -616,11 +619,10 @@ document.body.prepend(renderer.domElement);
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0xf1f2f1);
-scene.fog = new THREE.Fog(0xf1f2f1, 14, 34);
 const pmrem = new THREE.PMREMGenerator(renderer);
 scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
 
-const camera = new THREE.PerspectiveCamera(42, innerWidth / innerHeight, 0.1, 100);
+const camera = new THREE.PerspectiveCamera(42, innerWidth / innerHeight, 0.1, 1000);
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true;
 controls.enablePan = false;
@@ -661,18 +663,20 @@ const squares = [];
 const tints = [];
 const markers = [];
 
-// Plastic slab with soft, rounded edges.
+// Slab with soft, rounded edges.
 const SLAB = 9.1, SLAB_T = 0.3, BEVEL = 0.1;
 const slabGeo = new THREE.ExtrudeGeometry(roundRect(SLAB - 2 * BEVEL, SLAB - 2 * BEVEL, 0.5), {
   depth: SLAB_T - 2 * BEVEL, bevelEnabled: true, bevelThickness: BEVEL, bevelSize: BEVEL,
   bevelSegments: 8, curveSegments: 24,
 });
 flat(slabGeo);
-// Glossy plastic: smooth base with a clear lacquer layer that picks up reflections.
-const plastic = (color, roughness = 0.28) => new THREE.MeshPhysicalMaterial({
-  color, roughness, clearcoat: 1, clearcoatRoughness: 0.06, envMapIntensity: 1.1,
+// Plastic floor: smooth base with a light lacquer layer and soft reflections.
+const plastic = (color, roughness = 0.38) => new THREE.MeshPhysicalMaterial({
+  color, roughness, clearcoat: 0.45, clearcoatRoughness: 0.3, envMapIntensity: 0.45,
 });
-const slab = new THREE.Mesh(slabGeo, plastic(0xc5c9cd));
+// Board surfaces use the original pieces' matte "stone" finish: white set for the slab,
+// black set for the inlaid squares.
+const slab = new THREE.Mesh(slabGeo, new THREE.MeshStandardMaterial({ color: 0xebebe8, roughness: 0.85 }));
 slab.position.y = -(SLAB_T - BEVEL);
 slab.castShadow = true;
 slab.receiveShadow = true;
@@ -680,7 +684,7 @@ scene.add(slab);
 
 // Dark squares are rounded inlays; light squares are the bare slab.
 const tileGeo = flat(new THREE.ShapeGeometry(roundRect(0.84, 0.84, 0.13), 8));
-const inlayMat = plastic(0x32373b, 0.22);
+const inlayMat = new THREE.MeshStandardMaterial({ color: 0x3a3a3c, roughness: 0.7 });
 const hitGeo = flat(new THREE.PlaneGeometry(1, 1));
 const hitMat = new THREE.MeshBasicMaterial({ visible: false });
 const dotGeo = flat(new THREE.CircleGeometry(0.13, 32));
@@ -712,7 +716,7 @@ for (let i = 0; i < 64; i++) {
   markers.push(mk);
 }
 
-const table = new THREE.Mesh(flat(new THREE.PlaneGeometry(80, 80)), plastic(0xf4f5f4, 0.35));
+const table = new THREE.Mesh(flat(new THREE.PlaneGeometry(800, 800)), plastic(0xf4f5f4, 0.35));
 table.position.y = -SLAB_T;
 table.receiveShadow = true;
 scene.add(table);
@@ -790,20 +794,353 @@ function pieceParts(t) {
   return parts;
 }
 
+// ---------- original pawn & rook ----------
+// Ported from the piece studio (chess/index.html on claude/awesome-ramanujan-w6cin5).
+// Built once with placeholder "role" materials, then cloned per colour.
+const stone = new THREE.MeshStandardMaterial({ name: 'stone' });
+const porcelain = new THREE.MeshStandardMaterial({ name: 'porcelain' });
+const ink = new THREE.MeshStandardMaterial({ name: 'ink' });
+
+// Proportions are traced from the reference photo in pixels:
+// y is measured down from the top of the crop. No feet: the hem rests on the floor.
+const PX = 2.2 / 192;
+const FLOOR_Y = 191.2;
+const toWorld = ([r, y]) => [r * PX, (FLOOR_Y - y) * PX];
+
+function spline(points, samples) {
+  const curve = new THREE.CatmullRomCurve3(points.map(([r, y]) => new THREE.Vector3(r, y, 0)), false, "centripetal");
+  return curve.getPoints(samples).map((v) => [Math.max(0, v.x), v.y]);
+}
+
+function add(parent, geometry, material, { pos = [0, 0, 0], rot = [0, 0, 0], scale = [1, 1, 1] } = {}) {
+  const mesh = new THREE.Mesh(geometry, material);
+  mesh.position.set(...pos);
+  mesh.rotation.set(...rot);
+  mesh.scale.set(...scale);
+  mesh.castShadow = true;
+  mesh.receiveShadow = true;
+  parent.add(mesh);
+  return mesh;
+}
+
+const csg = new Evaluator();
+csg.useGroups = true;
+
+// Hood opening cutter, a solid of revolution around the face axis (+z) through the head centre.
+// Subtracting it leaves: rounded lip -> short inner wall -> flat floor. The lip fillet keeps the rim soft.
+function hoodCutter({ R, openR, lip, depth }) {
+  const cR = openR + lip;                         // fillet centre, radial
+  const cZ = Math.sqrt((R - lip) ** 2 - cR ** 2); // fillet centre, along the face axis
+  const startA = Math.atan2(cZ, cR);              // where the fillet meets the sphere
+  const pts = [new THREE.Vector2(0, cZ - depth), new THREE.Vector2(openR, cZ - depth)];
+  // Wall, then the lip arc rolling out onto the sphere (the cutter is the space in front of it)
+  // (the arc stops a hair before it touches the sphere, so the cut never grazes the surface)
+  const endA = startA + 0.05;
+  for (let i = 0; i <= 20; i++) {
+    const a = Math.PI + (endA - Math.PI) * (i / 20);
+    pts.push(new THREE.Vector2(cR + lip * Math.cos(a), cZ + lip * Math.sin(a)));
+  }
+  // Close the solid by riding just outside the sphere back to the front pole, so nothing
+  // outside the head (e.g. where the neck flares in under the chin) is touched
+  const shell = R * 1.006;
+  for (let i = 0; i <= 24; i++) {
+    const a = startA + (Math.PI / 2 - startA) * (i / 24);
+    pts.push(new THREE.Vector2(shell * Math.cos(a), shell * Math.sin(a)));
+  }
+  const geo = new THREE.LatheGeometry(pts, 40);
+  geo.rotateX(Math.PI / 2); // lathe axis y -> face axis z
+  return { geo, floorZ: cZ - depth };
+}
+
+// Mask: a gently domed disc with eyes and a nose line pressed into it.
+// Its widest edge sits on the floor of the opening, so it fills the hole right up to the wall.
+function maskMesh({ r, z0, bulge }) {
+  const domeGeo = new THREE.SphereGeometry(1, 28, 20);
+  domeGeo.scale(r, r, bulge);
+  domeGeo.translate(0, 0, z0);
+  const surfaceZ = (x, y) => z0 + bulge * Math.sqrt(Math.max(0, 1 - (x * x + y * y) / (r * r)));
+
+  let result = new Brush(domeGeo, porcelain);
+  const press = (geo) => {
+    result.updateMatrixWorld();
+    const tool = new Brush(geo, ink);
+    tool.updateMatrixWorld();
+    result = csg.evaluate(result, tool, SUBTRACTION);
+  };
+  const eyeR = 0.177 * r;
+  for (const x of [-0.506 * r, 0.506 * r]) {
+    const y = 0.063 * r;
+    press(new THREE.SphereGeometry(eyeR, 14, 10).translate(x, y, surfaceZ(x, y) + eyeR * 0.45));
+  }
+  const noseR = 0.076 * r;
+  const noseY = 0.02 * r;
+  press(new THREE.CapsuleGeometry(noseR, 0.42 * r, 6, 12).translate(0, noseY, surfaceZ(0, noseY) + noseR * 0.2));
+
+  const mesh = new THREE.Mesh(result.geometry, result.material);
+  mesh.castShadow = mesh.receiveShadow = true;
+  return mesh;
+}
+
+// Shared hooded head used by every piece. The body lathe already contains the round head;
+// this cuts the soft-rimmed opening into it and seats the mask.
+// All face proportions scale with R (world units); the pawn's values (R = 42px) are the reference look.
+function addHoodedFace(parent, bodyGeo, { R, centerY, tilt = THREE.MathUtils.degToRad(6) }) {
+  const k = R / 42;
+  const openR = 25 * k;
+  const { geo, floorZ } = hoodCutter({ R, openR, lip: 3.5 * k, depth: 5 * k });
+  geo.rotateX(-tilt); // face looks very slightly upward, which keeps the chin clear of the neck flare
+  geo.translate(0, centerY, 0);
+  const body = new Brush(bodyGeo, stone);
+  const cutter = new Brush(geo, stone);
+  body.updateMatrixWorld();
+  cutter.updateMatrixWorld();
+  const result = csg.evaluate(body, cutter, SUBTRACTION);
+  add(parent, result.geometry, result.material);
+  const mask = maskMesh({ r: openR - 0.4 * k, z0: floorZ, bulge: 10 * k });
+  mask.position.y = centerY;
+  mask.rotation.x = -tilt;
+  parent.add(mask);
+}
+
+// Outline of a round head smoothly merged into a neck column (2D signed distances + smooth min),
+// so the head flows into the neck with continuous curvature instead of a crease.
+function headNeckOutline({ R, headY, neckR, neckBottomY, blend }) {
+  const smin = (a, b, k) => {
+    const h = Math.max(k - Math.abs(a - b), 0) / k;
+    return Math.min(a, b) - h * h * h * k / 6;
+  };
+  const sdf = (r, y) => {
+    const head = Math.hypot(r, y - headY) - R;
+    const neck = Math.max(r - neckR(y), headY - y); // column only below the head centre
+    return smin(head, neck, blend);
+  };
+  const pts = [];
+  const top = headY - R, steps = 70;
+  for (let i = 0; i <= steps; i++) {
+    // denser sampling near the top pole where the outline turns fastest
+    const u = i / steps;
+    const y = top + (neckBottomY - top) * (u < 0.15 ? (u / 0.15) ** 2 * 0.15 : u);
+    let lo = 0, hi = R * 2;
+    if (sdf(lo, y) > 0) { pts.push([0, y]); continue; }
+    for (let j = 0; j < 40; j++) {
+      const mid = (lo + hi) / 2;
+      if (sdf(mid, y) > 0) hi = mid; else lo = mid;
+    }
+    pts.push([lo, y]);
+  }
+  pts[0] = [0, top];
+  return pts;
+}
+
+function makePawn() {
+  const g = new THREE.Group();
+
+  // Head: a clean sphere (the photo's head is softened into a round one), merged into the neck
+  const R = 42, headY = 62; // px (neck shortened from the photo by 8px)
+  const neckR = (y) => THREE.MathUtils.lerp(24.6, 26.3, THREE.MathUtils.clamp((y - 104) / (130.6 - 104), 0, 1));
+  const headNeck = headNeckOutline({ R, headY, neckR, neckBottomY: 130.6, blend: 9 });
+  // Raised band: stands proud of both the neck and the top of the skirt, with slightly rounded edges
+  const band = [[27, 131], [30.4, 131.3], [31.3, 132.2], [31.5, 137.5], [31.3, 142.8], [30.4, 143.7], [28.4, 144]];
+  const skirt = spline([
+    [28.6, 145], [30.5, 152], [33, 160], [36, 168], [39.5, 176], [42.5, 183], [43.8, 187], [43.6, 189.5], [42.6, 191],
+  ], 16);
+  const profile = [...headNeck, ...band, ...skirt, [30, 191.2], [0, 191.2]]
+    .map(toWorld).map(([r, y]) => new THREE.Vector2(r, y))
+    .reverse(); // lathe expects bottom-to-top so the faces point outward
+  const bodyGeo = new THREE.LatheGeometry(profile, 40);
+
+  addHoodedFace(g, bodyGeo, { R: R * PX, centerY: (FLOOR_Y - headY) * PX });
+  return g;
+}
+
+// ---------------------------------------------------------------------------
+// Signed-distance modelling. Pieces built from boxes, cylinders and cut-outs are described
+// as one distance function (in photo pixels, y up from the floor) and meshed with surface nets,
+// which gives a single closed, softly blended surface.
+const sd = {
+  smin(a, b, k) { const h = Math.max(k - Math.abs(a - b), 0) / k; return Math.min(a, b) - h * h * h * k / 6; },
+  smax(a, b, k) { return -sd.smin(-a, -b, k); },
+  // vertical rounded cylinder: radius r, from y0 to y1, edge rounding rb
+  cyl(x, y, z, r, y0, y1, rb) {
+    const qx = Math.hypot(x, z) - (r - rb);
+    const qy = Math.abs(y - (y0 + y1) / 2) - ((y1 - y0) / 2 - rb);
+    return Math.min(Math.max(qx, qy), 0) + Math.hypot(Math.max(qx, 0), Math.max(qy, 0)) - rb;
+  },
+  // rounded box centred at (cx, cy, cz) with half sizes (hx, hy, hz)
+  box(x, y, z, cx, cy, cz, hx, hy, hz, rb) {
+    const qx = Math.abs(x - cx) - (hx - rb), qy = Math.abs(y - cy) - (hy - rb), qz = Math.abs(z - cz) - (hz - rb);
+    const ox = Math.max(qx, 0), oy = Math.max(qy, 0), oz = Math.max(qz, 0);
+    return Math.hypot(ox, oy, oz) + Math.min(Math.max(qx, qy, qz), 0) - rb;
+  },
+};
+
+// Surface nets: one vertex per sign-changing cell, one quad per sign-changing grid edge.
+function meshSDF(f, { min, max, step }) {
+  const nx = Math.ceil((max[0] - min[0]) / step) + 1;
+  const ny = Math.ceil((max[1] - min[1]) / step) + 1;
+  const nz = Math.ceil((max[2] - min[2]) / step) + 1;
+  const idx = (i, j, k) => i + nx * (j + ny * k);
+  const v = new Float32Array(nx * ny * nz);
+  for (let k = 0; k < nz; k++) for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) {
+    v[idx(i, j, k)] = f(min[0] + i * step, min[1] + j * step, min[2] + k * step);
+  }
+  const cellVert = new Int32Array(nx * ny * nz).fill(-1);
+  const pos = [];
+  const corners = [[0,0,0],[1,0,0],[0,1,0],[1,1,0],[0,0,1],[1,0,1],[0,1,1],[1,1,1]];
+  const edges = [[0,1],[2,3],[4,5],[6,7],[0,2],[1,3],[4,6],[5,7],[0,4],[1,5],[2,6],[3,7]];
+  const cv = new Float32Array(8);
+  for (let k = 0; k < nz - 1; k++) for (let j = 0; j < ny - 1; j++) for (let i = 0; i < nx - 1; i++) {
+    let inside = 0;
+    for (let c = 0; c < 8; c++) {
+      const [a, b, d] = corners[c];
+      cv[c] = v[idx(i + a, j + b, k + d)];
+      if (cv[c] < 0) inside++;
+    }
+    if (inside === 0 || inside === 8) continue;
+    let sx = 0, sy = 0, sz = 0, n = 0;
+    for (const [e0, e1] of edges) {
+      const a = cv[e0], b = cv[e1];
+      if ((a < 0) === (b < 0)) continue;
+      const t = a / (a - b);
+      const c0 = corners[e0], c1 = corners[e1];
+      sx += c0[0] + (c1[0] - c0[0]) * t; sy += c0[1] + (c1[1] - c0[1]) * t; sz += c0[2] + (c1[2] - c0[2]) * t;
+      n++;
+    }
+    cellVert[idx(i, j, k)] = pos.length / 3;
+    pos.push(min[0] + (i + sx / n) * step, min[1] + (j + sy / n) * step, min[2] + (k + sz / n) * step);
+  }
+  const tris = [];
+  const quad = (a, b, c, d) => { if (a < 0 || b < 0 || c < 0 || d < 0) return; tris.push(a, b, c, a, c, d); };
+  for (let k = 1; k < nz - 1; k++) for (let j = 1; j < ny - 1; j++) for (let i = 1; i < nx - 1; i++) {
+    const s0 = v[idx(i, j, k)] < 0;
+    if (s0 !== (v[idx(i + 1, j, k)] < 0)) quad(cellVert[idx(i, j - 1, k - 1)], cellVert[idx(i, j, k - 1)], cellVert[idx(i, j, k)], cellVert[idx(i, j - 1, k)]);
+    if (s0 !== (v[idx(i, j + 1, k)] < 0)) quad(cellVert[idx(i - 1, j, k - 1)], cellVert[idx(i, j, k - 1)], cellVert[idx(i, j, k)], cellVert[idx(i - 1, j, k)]);
+    if (s0 !== (v[idx(i, j, k + 1)] < 0)) quad(cellVert[idx(i - 1, j - 1, k)], cellVert[idx(i, j - 1, k)], cellVert[idx(i, j, k)], cellVert[idx(i - 1, j, k)]);
+  }
+  // Normals from the distance field's gradient; flip any triangle wound against it
+  const e = step * 0.5;
+  const nrm = new Float32Array(pos.length);
+  for (let p = 0; p < pos.length; p += 3) {
+    const x = pos[p], y = pos[p + 1], z = pos[p + 2];
+    const gx = f(x + e, y, z) - f(x - e, y, z), gy = f(x, y + e, z) - f(x, y - e, z), gz = f(x, y, z + e) - f(x, y, z - e);
+    const l = Math.hypot(gx, gy, gz) || 1;
+    nrm[p] = gx / l; nrm[p + 1] = gy / l; nrm[p + 2] = gz / l;
+  }
+  for (let t = 0; t < tris.length; t += 3) {
+    const [a, b, c] = [tris[t] * 3, tris[t + 1] * 3, tris[t + 2] * 3];
+    const ux = pos[b] - pos[a], uy = pos[b + 1] - pos[a + 1], uz = pos[b + 2] - pos[a + 2];
+    const wx = pos[c] - pos[a], wy = pos[c + 1] - pos[a + 1], wz = pos[c + 2] - pos[a + 2];
+    const fx = uy * wz - uz * wy, fy = uz * wx - ux * wz, fz = ux * wy - uy * wx;
+    if (fx * (nrm[a] + nrm[b] + nrm[c]) + fy * (nrm[a + 1] + nrm[b + 1] + nrm[c + 1]) + fz * (nrm[a + 2] + nrm[b + 2] + nrm[c + 2]) < 0) {
+      const tmp = tris[t + 1]; tris[t + 1] = tris[t + 2]; tris[t + 2] = tmp;
+    }
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+  geo.setAttribute("normal", new THREE.BufferAttribute(nrm, 3));
+  geo.setIndex(tris);
+  return geo;
+}
+
+// The hooded face for distance-field pieces: same opening, lip and mask sizes as the pawn
+const FACE = { openR: 25, lip: 5, maskR: 24.6, bulge: 10 };
+function faceOpening(d, x, y, z, { cy, floorZ, lip = FACE.lip }) {
+  const hole = Math.max(Math.hypot(x, y - cy) - FACE.openR, floorZ - z);
+  return sd.smax(d, -hole, lip);
+}
+function addMask(parent, { cy, floorZ }) {
+  const mask = maskMesh({ r: FACE.maskR * PX, z0: floorZ * PX, bulge: FACE.bulge * PX });
+  mask.position.y = cy * PX;
+  parent.add(mask);
+}
+
+// Rook: tower head with crenellations and side "ears", over a stack of three thick discs.
+// Heights are photo pixels measured up from the floor (the bottom disc rests on it).
+function makeRook() {
+  const g = new THREE.Group();
+  const headR = 33.5, coreR = 37.5;
+  // Face: a plain flat-bottomed round pocket milled straight into the tower, with a small edge break.
+  // The floor is deep enough that the rim survives where the tower curves away at the sides.
+  const face = { cy: 142, floorZ: 19, lip: 2 };
+  const merlons = 8, sector = (Math.PI * 2) / merlons;
+  const f = (x, y, z) => {
+    // core column and the three discs
+    let d = sd.cyl(x, y, z, coreR, 0, 100, 2);
+    d = sd.smin(d, sd.cyl(x, y, z, 44.5, 0, 23, 4.5), 2);
+    d = sd.smin(d, sd.cyl(x, y, z, 45, 43, 71, 4.5), 2);
+    d = sd.smin(d, sd.cyl(x, y, z, 44.5, 84, 110, 4.5), 2);
+    // tower head
+    d = sd.smin(d, sd.cyl(x, y, z, headR, 100, 191, 1.2), 3);
+    // ears on both sides
+    d = sd.smin(d, sd.box(x, y, z, 37.5, 144.5, 0, 5, 13.5, 8, 1.2), 1.4);
+    d = sd.smin(d, sd.box(x, y, z, -37.5, 144.5, 0, 5, 13.5, 8, 1.2), 1.4);
+    // crenellations: crisp, blocky merlons; the inner well and the notches share one floor height
+    const crownFloor = 179;
+    d = sd.smax(d, -sd.cyl(x, y, z, 23.5, crownFloor, 230, 0.6), 1.4);
+    const a = Math.atan2(z, x);
+    const notchA = Math.round(a / sector) * sector; // nearest notch (one sits dead centre above the face)
+    const ca = Math.cos(-notchA), sa = Math.sin(-notchA);
+    const lx = x * ca - z * sa, lz = x * sa + z * ca;
+    d = sd.smax(d, -sd.box(lx, y, lz, 40, crownFloor + 20, 0, 18, 20, 3.5, 0.6), 1.4);
+    // face opening
+    return faceOpening(d, x, y, z, face);
+  };
+  const geo = meshSDF(f, { min: [-50, -2, -50], max: [50, 194, 50], step: 2.0 });
+  geo.scale(PX, PX, PX);
+  add(g, geo, stone);
+  addMask(g, face);
+  return g;
+}
+
+// Role materials per side: the body matches the other pieces; the black set inverts the features.
+const roleMats = {
+  w: {
+    stone: pieceMats.w,
+    porcelain: new THREE.MeshStandardMaterial({ color: 0xfbf4e6, roughness: 0.25, envMapIntensity: 0.6 }),
+    ink: new THREE.MeshStandardMaterial({ color: 0x1c1c1c, roughness: 0.6 }),
+  },
+  b: {
+    stone: pieceMats.b,
+    porcelain: new THREE.MeshStandardMaterial({ color: 0x231d1a, roughness: 0.22, envMapIntensity: 0.8 }),
+    ink: new THREE.MeshStandardMaterial({ color: 0xf0ece4, roughness: 0.6 }),
+  },
+};
+// The studio pieces are 2.2 units tall; this brings them in line with the rest of the set
+// (pawns stay the shortest piece).
+const ORIGINAL_SCALE = { p: 0.4, r: 0.46 };
+const originalTemplates = {};
+function makeOriginal(t, c) {
+  if (!originalTemplates[t]) originalTemplates[t] = t === 'p' ? makePawn() : makeRook();
+  const g = originalTemplates[t].clone(true);
+  g.scale.setScalar(ORIGINAL_SCALE[t]);
+  const swap = m => roleMats[c][m.name];
+  g.traverse(o => {
+    if (!o.isMesh) return;
+    o.material = Array.isArray(o.material) ? o.material.map(swap) : swap(o.material);
+  });
+  return g;
+}
+
 function makePiece(p, sq) {
   const outer = new THREE.Group();
   const inner = new THREE.Group();
   outer.add(inner);
-  for (const { geo, pos } of pieceParts(p.t)) {
-    const m = new THREE.Mesh(geo, pieceMats[p.c]);
-    m.position.set(...pos);
-    m.castShadow = true;
-    m.receiveShadow = true;
-    inner.add(m);
+  if (p.t === 'p' || p.t === 'r') {
+    // Original pieces; their faces look toward the opponent.
+    inner.add(makeOriginal(p.t, p.c));
+    inner.rotation.y = p.c === 'w' ? Math.PI : 0;
+  } else {
+    for (const { geo, pos } of pieceParts(p.t)) {
+      const m = new THREE.Mesh(geo, pieceMats[p.c]);
+      m.position.set(...pos);
+      m.castShadow = true;
+      m.receiveShadow = true;
+      inner.add(m);
+    }
+    // Knights look toward the opponent, turned slightly toward the board centre.
+    const turn = (sq & 7) < 4 ? -0.6 : 0.6;
+    inner.rotation.y = p.c === 'w' ? Math.PI / 2 + turn : -Math.PI / 2 - turn;
   }
-  // Knights look toward the opponent, turned slightly toward the board centre.
-  const turn = (sq & 7) < 4 ? -0.6 : 0.6;
-  inner.rotation.y = p.c === 'w' ? Math.PI / 2 + turn : -Math.PI / 2 - turn;
   outer.userData.inner = inner;
   outer.userData.lift = 0;
   return outer;
