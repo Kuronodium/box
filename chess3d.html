@@ -794,8 +794,9 @@ function pieceParts(t) {
   return parts;
 }
 
-// ---------- original pawn & rook ----------
+// ---------- original pawn, rook & knight ----------
 // Ported from the piece studio (chess/index.html on claude/awesome-ramanujan-w6cin5).
+// Synced with studio commit: 13d27ae
 // Built once with placeholder "role" materials, then cloned per colour.
 const stone = new THREE.MeshStandardMaterial({ name: 'stone' });
 const porcelain = new THREE.MeshStandardMaterial({ name: 'porcelain' });
@@ -1044,13 +1045,13 @@ function meshSDF(f, { min, max, step }) {
 
 // The hooded face for distance-field pieces: same opening, lip and mask sizes as the pawn
 const FACE = { openR: 25, lip: 5, maskR: 24.6, bulge: 10 };
-function faceOpening(d, x, y, z, { cy, floorZ, lip = FACE.lip }) {
-  const hole = Math.max(Math.hypot(x, y - cy) - FACE.openR, floorZ - z);
+function faceOpening(d, x, y, z, { cx = 0, cy, floorZ, lip = FACE.lip }) {
+  const hole = Math.max(Math.hypot(x - cx, y - cy) - FACE.openR, floorZ - z);
   return sd.smax(d, -hole, lip);
 }
-function addMask(parent, { cy, floorZ }) {
+function addMask(parent, { cx = 0, cy, floorZ }) {
   const mask = maskMesh({ r: FACE.maskR * PX, z0: floorZ * PX, bulge: FACE.bulge * PX });
-  mask.position.y = cy * PX;
+  mask.position.set(cx * PX, cy * PX, 0);
   parent.add(mask);
 }
 
@@ -1092,6 +1093,111 @@ function makeRook() {
   return g;
 }
 
+// Signed distance to a closed 2D polygon (Inigo Quilez), pre-baked onto a grid for speed
+function polygonField(points, { min, max, step }) {
+  const sdPoly = (px, py) => {
+    let d = Infinity, sgn = 1;
+    for (let i = 0, j = points.length - 1; i < points.length; j = i++) {
+      const [vix, viy] = points[i], [vjx, vjy] = points[j];
+      const ex = vjx - vix, ey = vjy - viy, wx = px - vix, wy = py - viy;
+      const len2 = ex * ex + ey * ey;
+      const t = len2 > 0 ? Math.min(Math.max((wx * ex + wy * ey) / len2, 0), 1) : 0;
+      const bx = wx - ex * t, by = wy - ey * t;
+      d = Math.min(d, bx * bx + by * by);
+      const c1 = py >= viy, c2 = py < vjy, c3 = ex * wy > ey * wx;
+      if ((c1 && c2 && c3) || (!c1 && !c2 && !c3)) sgn = -sgn;
+    }
+    return sgn * Math.sqrt(d);
+  };
+  const nx = Math.ceil((max[0] - min[0]) / step) + 1, ny = Math.ceil((max[1] - min[1]) / step) + 1;
+  const grid = new Float32Array(nx * ny);
+  for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) grid[i + nx * j] = sdPoly(min[0] + i * step, min[1] + j * step);
+  return (x, y) => {
+    const fx = (x - min[0]) / step, fy = (y - min[1]) / step;
+    if (fx < 0 || fy < 0 || fx >= nx - 1 || fy >= ny - 1) {
+      const cx = Math.min(Math.max(x, min[0]), max[0]), cy = Math.min(Math.max(y, min[1]), max[1]);
+      return Math.hypot(x - cx, y - cy) + 10;
+    }
+    const i = Math.floor(fx), j = Math.floor(fy), u = fx - i, v = fy - j, k = i + nx * j;
+    return (grid[k] * (1 - u) + grid[k + 1] * u) * (1 - v) + (grid[k + nx] * (1 - u) + grid[k + nx + 1] * u) * v;
+  };
+}
+const smoothLoop = (pts, samples) => new THREE.CatmullRomCurve3(pts.map(([x, y]) => new THREE.Vector3(x, y, 0)), true, "centripetal")
+  .getPoints(samples).slice(0, -1).map((v) => [v.x, v.y]); // drop the repeated closing point
+
+// Knight: a classic Staunton-style horse head, traced from a reference side view.
+// The traced outline is smoothed into curves, then given a sculpted thickness: a round, pillowy
+// cross-section that falls away toward the outline, a slim muzzle, full cheeks (the jaw),
+// a slight brow, a narrower throat and a heavy lower neck. The mane is a thin curved blade along
+// the back with the two ears standing either side of it. The set's mask sits low on the neck.
+function makeKnight() {
+  const g = new THREE.Group();
+  // Reference outline in its own image pixels (horse facing right), mapped to piece pixels:
+  // mirrored so the muzzle points to -x, scaled, and stood on the collar at y = 33.
+  const S = 0.284, OX = 510, OY = 690, BASE = 33;
+  const map = ([X, Y]) => [-(X - OX) * S, BASE + (OY - Y) * S];
+  const body = smoothLoop([
+    [614, 690], [628, 610], [626, 530], [606, 465], [580, 400], [596, 398],
+    [640, 418], [690, 440], [722, 436], [748, 410], [754, 376], [738, 340],
+    [690, 268], [642, 196], [606, 152], [560, 140],
+    [500, 160], [440, 196], [398, 250], [374, 330], [372, 420], [384, 520], [408, 610], [428, 690],
+  ].map(map), 300);
+  const mane = smoothLoop([
+    [600, 130], [548, 106], [470, 103], [404, 116], [370, 142],
+    [356, 168], [348, 196], [338, 228], [328, 266],
+    [320, 330], [322, 420], [338, 492], [366, 548],
+    [394, 536], [384, 420], [386, 330], [408, 254], [448, 204], [504, 168], [566, 150], [604, 152],
+  ].map(map), 220);
+  const bodyD = polygonField(body, { min: [-75, 25], max: [65, 215], step: 0.7 });
+  const maneD = polygonField(mane, { min: [-40, 40], max: [65, 215], step: 0.7 });
+  const ss = THREE.MathUtils.smootherstep;
+  const bump = (x, y, cx, cy, rx, ry) => Math.exp(-(((x - cx) / rx) ** 2 + ((y - cy) / ry) ** 2));
+  // Sculpted half thickness of the head and neck
+  const halfW = (x, y) => {
+    let w = THREE.MathUtils.lerp(19, 12, ss(y, 95, 160)); // heavy lower neck -> slimmer head
+    w -= ss(-x, 34, 62) * 5.6;                           // muzzle narrows toward the nose
+    w += 1.3 * bump(x, y, -61, 128, 5, 6);               // slight flare at the nostrils
+    w += 6.5 * bump(x, y, -24, 135, 9.5, 9);             // full, round cheeks / jaw
+    w += 1.6 * bump(x, y, -31, 165, 6, 4);               // brow over the eye
+    w -= 2.5 * bump(x, y, -24, 104, 8, 10);              // throat under the jaw
+    w += 1.5 * bump(x, y, 4, 165, 14, 18);               // crest of the neck behind the head
+    return w;
+  };
+  // Inflate an outline: full thickness inside, rounding off over `edge` toward the outline
+  const inflate = (d2, z, h, edge) => {
+    const t = Math.min(Math.max(-d2 / edge, 0), 1);
+    const zext = h * (1 - (1 - t) ** 3);
+    return Math.max(d2, (Math.abs(z) - zext) * 0.8);
+  };
+  // ear: a tapered capsule from base to tip, leaning outward so the pair frames the mane
+  const ear = (x, y, z, b, t, r0, r1) => {
+    const ax = t[0] - b[0], ay = t[1] - b[1], az = t[2] - b[2];
+    const px = x - b[0], py = y - b[1], pz = z - b[2];
+    const k = Math.min(Math.max((px * ax + py * ay + pz * az) / (ax * ax + ay * ay + az * az), 0), 1);
+    return Math.hypot(px - ax * k, py - ay * k, pz - az * k) - THREE.MathUtils.lerp(r0, r1, k);
+  };
+  const [ebx, eby] = map([588, 152]), [etx, ety] = map([604, 86]);
+  const face = { cx: 1, cy: 74, floorZ: 14, lip: 2 };
+  const f = (x, y, z) => {
+    // round base: two discs with a groove, and a squat collar
+    let d = sd.cyl(x, y, z, 44, 0, 10, 2.5);
+    d = sd.smin(d, sd.cyl(x, y, z, 43, 11, 22, 3.5), 1);
+    d = sd.smin(d, sd.cyl(x, y, z, 31, 21, 34, 5), 3);
+    // head and neck, mane blade, ears either side of the mane
+    d = sd.smin(d, inflate(bodyD(x, y), z, halfW(x, y), 9), 3);
+    d = sd.smin(d, inflate(maneD(x, y), z, 4.2, 2.5), 2);
+    for (const s of [-1, 1]) {
+      d = sd.smin(d, ear(x, y, z, [ebx, eby, s * 7], [etx, ety, s * 10.5], 4.8, 1.4), 2.5);
+    }
+    return faceOpening(d, x, y, z, face);
+  };
+  const geo = meshSDF(f, { min: [-72, -2, -46], max: [60, 216, 46], step: 1.6 });
+  geo.scale(PX, PX, PX);
+  add(g, geo, stone);
+  addMask(g, face);
+  return g;
+}
+
 // Role materials per side: the body matches the other pieces; the black set inverts the features.
 const roleMats = {
   w: {
@@ -1107,10 +1213,10 @@ const roleMats = {
 };
 // The studio pieces are 2.2 units tall; this brings them in line with the rest of the set
 // (pawns stay the shortest piece).
-const ORIGINAL_SCALE = { p: 0.4, r: 0.46 };
+const ORIGINAL_SCALE = { p: 0.4, r: 0.46, n: 0.46 };
 const originalTemplates = {};
 function makeOriginal(t, c) {
-  if (!originalTemplates[t]) originalTemplates[t] = t === 'p' ? makePawn() : makeRook();
+  if (!originalTemplates[t]) originalTemplates[t] = { p: makePawn, r: makeRook, n: makeKnight }[t]();
   const g = originalTemplates[t].clone(true);
   g.scale.setScalar(ORIGINAL_SCALE[t]);
   const swap = m => roleMats[c][m.name];
@@ -1125,7 +1231,7 @@ function makePiece(p, sq) {
   const outer = new THREE.Group();
   const inner = new THREE.Group();
   outer.add(inner);
-  if (p.t === 'p' || p.t === 'r') {
+  if (p.t === 'p' || p.t === 'r' || p.t === 'n') {
     // Original pieces; their faces look toward the opponent.
     inner.add(makeOriginal(p.t, p.c));
     inner.rotation.y = p.c === 'w' ? Math.PI : 0;
