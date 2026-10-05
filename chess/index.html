@@ -31,6 +31,8 @@
   }
   .views button[aria-pressed="true"] { background: var(--fg); color: var(--bg); }
   .views button:focus-visible { outline: 2px solid var(--fg); outline-offset: 2px; }
+  .pieces { right: auto; left: 16px; }
+  .sides { right: auto; left: 16px; top: calc(60px + env(safe-area-inset-top, 0px)); }
 </style>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Zen+Kaku+Gothic+New:wght@400;700&display=swap">
 
@@ -40,8 +42,16 @@
   <button type="button" id="view-wire" data-mode="wire" aria-pressed="false">ワイヤー</button>
   <button type="button" id="view-both" data-mode="both" aria-pressed="false">両方</button>
 </div>
+<div class="views pieces" role="group" aria-label="駒">
+  <button type="button" id="piece-pawn" data-piece="pawn" aria-pressed="false">ポーン</button>
+  <button type="button" id="piece-rook" data-piece="rook" aria-pressed="true">ルーク</button>
+</div>
+<div class="views sides" role="group" aria-label="先手・後手">
+  <button type="button" id="side-white" data-side="white" aria-pressed="true">白</button>
+  <button type="button" id="side-black" data-side="black" aria-pressed="false">黒</button>
+</div>
 <div class="caption">
-  <strong>PAWN</strong>
+  <strong id="piece-name">ROOK</strong>
   <span>ドラッグで回転 / ホイール・ピンチで拡大縮小</span>
 </div>
 
@@ -273,30 +283,212 @@ function makePawn() {
   return g;
 }
 
-const piece = makePawn();
-scene.add(piece);
+// ---------------------------------------------------------------------------
+// Signed-distance modelling. Pieces built from boxes, cylinders and cut-outs are described
+// as one distance function (in photo pixels, y up from the floor) and meshed with surface nets,
+// which gives a single closed, softly blended surface.
+const sd = {
+  smin(a, b, k) { const h = Math.max(k - Math.abs(a - b), 0) / k; return Math.min(a, b) - h * h * h * k / 6; },
+  smax(a, b, k) { return -sd.smin(-a, -b, k); },
+  // vertical rounded cylinder: radius r, from y0 to y1, edge rounding rb
+  cyl(x, y, z, r, y0, y1, rb) {
+    const qx = Math.hypot(x, z) - (r - rb);
+    const qy = Math.abs(y - (y0 + y1) / 2) - ((y1 - y0) / 2 - rb);
+    return Math.min(Math.max(qx, qy), 0) + Math.hypot(Math.max(qx, 0), Math.max(qy, 0)) - rb;
+  },
+  // rounded box centred at (cx, cy, cz) with half sizes (hx, hy, hz)
+  box(x, y, z, cx, cy, cz, hx, hy, hz, rb) {
+    const qx = Math.abs(x - cx) - (hx - rb), qy = Math.abs(y - cy) - (hy - rb), qz = Math.abs(z - cz) - (hz - rb);
+    const ox = Math.max(qx, 0), oy = Math.max(qy, 0), oz = Math.max(qz, 0);
+    return Math.hypot(ox, oy, oz) + Math.min(Math.max(qx, qy, qz), 0) - rb;
+  },
+};
 
-// Wireframe overlay (edges of every mesh)
+// Surface nets: one vertex per sign-changing cell, one quad per sign-changing grid edge.
+function meshSDF(f, { min, max, step }) {
+  const nx = Math.ceil((max[0] - min[0]) / step) + 1;
+  const ny = Math.ceil((max[1] - min[1]) / step) + 1;
+  const nz = Math.ceil((max[2] - min[2]) / step) + 1;
+  const idx = (i, j, k) => i + nx * (j + ny * k);
+  const v = new Float32Array(nx * ny * nz);
+  for (let k = 0; k < nz; k++) for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) {
+    v[idx(i, j, k)] = f(min[0] + i * step, min[1] + j * step, min[2] + k * step);
+  }
+  const cellVert = new Int32Array(nx * ny * nz).fill(-1);
+  const pos = [];
+  const corners = [[0,0,0],[1,0,0],[0,1,0],[1,1,0],[0,0,1],[1,0,1],[0,1,1],[1,1,1]];
+  const edges = [[0,1],[2,3],[4,5],[6,7],[0,2],[1,3],[4,6],[5,7],[0,4],[1,5],[2,6],[3,7]];
+  const cv = new Float32Array(8);
+  for (let k = 0; k < nz - 1; k++) for (let j = 0; j < ny - 1; j++) for (let i = 0; i < nx - 1; i++) {
+    let inside = 0;
+    for (let c = 0; c < 8; c++) {
+      const [a, b, d] = corners[c];
+      cv[c] = v[idx(i + a, j + b, k + d)];
+      if (cv[c] < 0) inside++;
+    }
+    if (inside === 0 || inside === 8) continue;
+    let sx = 0, sy = 0, sz = 0, n = 0;
+    for (const [e0, e1] of edges) {
+      const a = cv[e0], b = cv[e1];
+      if ((a < 0) === (b < 0)) continue;
+      const t = a / (a - b);
+      const c0 = corners[e0], c1 = corners[e1];
+      sx += c0[0] + (c1[0] - c0[0]) * t; sy += c0[1] + (c1[1] - c0[1]) * t; sz += c0[2] + (c1[2] - c0[2]) * t;
+      n++;
+    }
+    cellVert[idx(i, j, k)] = pos.length / 3;
+    pos.push(min[0] + (i + sx / n) * step, min[1] + (j + sy / n) * step, min[2] + (k + sz / n) * step);
+  }
+  const tris = [];
+  const quad = (a, b, c, d) => { if (a < 0 || b < 0 || c < 0 || d < 0) return; tris.push(a, b, c, a, c, d); };
+  for (let k = 1; k < nz - 1; k++) for (let j = 1; j < ny - 1; j++) for (let i = 1; i < nx - 1; i++) {
+    const s0 = v[idx(i, j, k)] < 0;
+    if (s0 !== (v[idx(i + 1, j, k)] < 0)) quad(cellVert[idx(i, j - 1, k - 1)], cellVert[idx(i, j, k - 1)], cellVert[idx(i, j, k)], cellVert[idx(i, j - 1, k)]);
+    if (s0 !== (v[idx(i, j + 1, k)] < 0)) quad(cellVert[idx(i - 1, j, k - 1)], cellVert[idx(i, j, k - 1)], cellVert[idx(i, j, k)], cellVert[idx(i - 1, j, k)]);
+    if (s0 !== (v[idx(i, j, k + 1)] < 0)) quad(cellVert[idx(i - 1, j - 1, k)], cellVert[idx(i, j - 1, k)], cellVert[idx(i, j, k)], cellVert[idx(i - 1, j, k)]);
+  }
+  // Normals from the distance field's gradient; flip any triangle wound against it
+  const e = step * 0.5;
+  const nrm = new Float32Array(pos.length);
+  for (let p = 0; p < pos.length; p += 3) {
+    const x = pos[p], y = pos[p + 1], z = pos[p + 2];
+    const gx = f(x + e, y, z) - f(x - e, y, z), gy = f(x, y + e, z) - f(x, y - e, z), gz = f(x, y, z + e) - f(x, y, z - e);
+    const l = Math.hypot(gx, gy, gz) || 1;
+    nrm[p] = gx / l; nrm[p + 1] = gy / l; nrm[p + 2] = gz / l;
+  }
+  for (let t = 0; t < tris.length; t += 3) {
+    const [a, b, c] = [tris[t] * 3, tris[t + 1] * 3, tris[t + 2] * 3];
+    const ux = pos[b] - pos[a], uy = pos[b + 1] - pos[a + 1], uz = pos[b + 2] - pos[a + 2];
+    const wx = pos[c] - pos[a], wy = pos[c + 1] - pos[a + 1], wz = pos[c + 2] - pos[a + 2];
+    const fx = uy * wz - uz * wy, fy = uz * wx - ux * wz, fz = ux * wy - uy * wx;
+    if (fx * (nrm[a] + nrm[b] + nrm[c]) + fy * (nrm[a + 1] + nrm[b + 1] + nrm[c + 1]) + fz * (nrm[a + 2] + nrm[b + 2] + nrm[c + 2]) < 0) {
+      const tmp = tris[t + 1]; tris[t + 1] = tris[t + 2]; tris[t + 2] = tmp;
+    }
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+  geo.setAttribute("normal", new THREE.BufferAttribute(nrm, 3));
+  geo.setIndex(tris);
+  return geo;
+}
+
+// The hooded face for distance-field pieces: same opening, lip and mask sizes as the pawn
+const FACE = { openR: 25, lip: 5, maskR: 24.6, bulge: 10 };
+function faceOpening(d, x, y, z, { cy, floorZ }) {
+  const hole = Math.max(Math.hypot(x, y - cy) - FACE.openR, floorZ - z);
+  return sd.smax(d, -hole, FACE.lip);
+}
+function addMask(parent, { cy, floorZ }) {
+  const mask = maskMesh({ r: FACE.maskR * PX, z0: floorZ * PX, bulge: FACE.bulge * PX });
+  mask.position.y = cy * PX;
+  parent.add(mask);
+}
+
+// Rook: tower head with crenellations and side "ears", over a stack of three thick discs.
+// Heights are photo pixels measured up from the floor (the bottom disc rests on it).
+function makeRook() {
+  const g = new THREE.Group();
+  const headR = 33.5, coreR = 37.5;
+  const face = { cy: 142, frontZ: 30 };
+  face.floorZ = face.frontZ - 5; // same mask seating as the pawn: floor 5px behind the rim, dome 5px proud
+  const merlons = 8, sector = (Math.PI * 2) / merlons;
+  const f = (x, y, z) => {
+    // core column and the three discs
+    let d = sd.cyl(x, y, z, coreR, 0, 112, 2);
+    d = sd.smin(d, sd.cyl(x, y, z, 44.5, 0, 23, 4.5), 2);
+    d = sd.smin(d, sd.cyl(x, y, z, 45, 43, 71, 4.5), 2);
+    d = sd.smin(d, sd.cyl(x, y, z, 44.5, 84, 110, 4.5), 2);
+    // tower head
+    d = sd.smin(d, sd.cyl(x, y, z, headR, 100, 191, 2.5), 3);
+    // a gently flattened front where the face sits, blended into the round tower
+    d = sd.smin(d, sd.box(x, y, z, 0, face.cy, face.frontZ - 14, 29, 28, 14, 13), 8);
+    // ears on both sides
+    d = sd.smin(d, sd.box(x, y, z, 37.5, 144.5, 0, 5, 13.5, 8, 3), 2);
+    d = sd.smin(d, sd.box(x, y, z, -37.5, 144.5, 0, 5, 13.5, 8, 3), 2);
+    // crenellations: a shallow well in the top and notches between the merlons
+    d = sd.smax(d, -sd.cyl(x, y, z, 23.5, 182, 230, 1.5), 1.5);
+    const a = Math.atan2(z, x);
+    const notchA = Math.round(a / sector) * sector; // nearest notch (one sits dead centre above the face)
+    const ca = Math.cos(-notchA), sa = Math.sin(-notchA);
+    const lx = x * ca - z * sa, lz = x * sa + z * ca;
+    d = sd.smax(d, -sd.box(lx, y, lz, 40, 196, 0, 18, 17, 3.5, 1), 1.5);
+    // face opening
+    return faceOpening(d, x, y, z, face);
+  };
+  const geo = meshSDF(f, { min: [-50, -2, -50], max: [50, 194, 50], step: 0.8 });
+  geo.scale(PX, PX, PX);
+  add(g, geo, stone);
+  addMask(g, face);
+  return g;
+}
+
+// ---------------------------------------------------------------------------
+const builders = { pawn: makePawn, rook: makeRook };
+const names = { pawn: "PAWN", rook: "ROOK" };
+const built = {};
 const wireMat = new THREE.LineBasicMaterial({ color: 0x2a2a28, transparent: true, opacity: 0.4 });
-const wires = [];
-piece.traverse((o) => {
-  if (!o.isMesh) return;
-  const w = new THREE.LineSegments(new THREE.WireframeGeometry(o.geometry), wireMat);
-  w.visible = false;
-  o.add(w);
-  wires.push(w);
-});
+let wires = [];
+let piece = null;
+let mode = "solid";
 
-function setMode(mode) {
+function showPiece(key) {
+  if (piece) scene.remove(piece);
+  if (!built[key]) {
+    built[key] = builders[key]();
+    // Wireframe overlay (edges of every mesh)
+    built[key].traverse((o) => {
+      if (!o.isMesh) return;
+      const w = new THREE.LineSegments(new THREE.WireframeGeometry(o.geometry), wireMat);
+      w.userData.isWire = true;
+      o.add(w);
+    });
+  }
+  piece = built[key];
+  scene.add(piece);
+  wires = [];
+  piece.traverse((o) => { if (o.userData.isWire) wires.push(o); });
+  setMode(mode);
+  document.getElementById("piece-name").textContent = names[key];
+  document.querySelectorAll("[data-piece]").forEach((b) => {
+    b.setAttribute("aria-pressed", String(b.dataset.piece === key));
+  });
+}
+
+function setMode(next) {
+  mode = next;
   for (const m of materials) m.visible = mode !== "wire";
   for (const w of wires) w.visible = mode !== "solid";
-  document.querySelectorAll(".views button").forEach((b) => {
+  document.querySelectorAll("[data-mode]").forEach((b) => {
     b.setAttribute("aria-pressed", String(b.dataset.mode === mode));
   });
 }
-document.querySelectorAll(".views button").forEach((b) => {
+document.querySelectorAll("[data-mode]").forEach((b) => {
   b.addEventListener("click", () => setMode(b.dataset.mode));
 });
+document.querySelectorAll("[data-piece]").forEach((b) => {
+  b.addEventListener("click", () => showPiece(b.dataset.piece));
+});
+
+// White and black sets: the black set is the colour-inverted version
+// (dark body and mask, light pressed-in features)
+const palettes = {
+  white: { stone: [0xebebe8, 0.85], porcelain: [0xffffff, 0.35], ink: [0x1c1c1c, 0.6] },
+  black: { stone: [0x3a3a3c, 0.7], porcelain: [0x2c2c2e, 0.4], ink: [0xf0f0ec, 0.6] },
+};
+function setSide(side) {
+  const p = palettes[side];
+  for (const [m, key] of [[stone, "stone"], [porcelain, "porcelain"], [ink, "ink"]]) {
+    m.color.setHex(p[key][0]);
+    m.roughness = p[key][1];
+  }
+  document.querySelectorAll("[data-side]").forEach((b) => {
+    b.setAttribute("aria-pressed", String(b.dataset.side === side));
+  });
+}
+document.querySelectorAll("[data-side]").forEach((b) => {
+  b.addEventListener("click", () => setSide(b.dataset.side));
+});
+showPiece("rook");
 
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.target.set(0, 1.1, 0);
