@@ -374,9 +374,9 @@ function meshSDF(f, { min, max, step }) {
 
 // The hooded face for distance-field pieces: same opening, lip and mask sizes as the pawn
 const FACE = { openR: 25, lip: 5, maskR: 24.6, bulge: 10 };
-function faceOpening(d, x, y, z, { cy, floorZ }) {
+function faceOpening(d, x, y, z, { cy, floorZ, lip = FACE.lip }) {
   const hole = Math.max(Math.hypot(x, y - cy) - FACE.openR, floorZ - z);
-  return sd.smax(d, -hole, FACE.lip);
+  return sd.smax(d, -hole, lip);
 }
 function addMask(parent, { cy, floorZ }) {
   const mask = maskMesh({ r: FACE.maskR * PX, z0: floorZ * PX, bulge: FACE.bulge * PX });
@@ -389,8 +389,9 @@ function addMask(parent, { cy, floorZ }) {
 function makeRook() {
   const g = new THREE.Group();
   const headR = 33.5, coreR = 37.5;
-  const face = { cy: 142, frontZ: 30 };
-  face.floorZ = face.frontZ - 5; // same mask seating as the pawn: floor 5px behind the rim, dome 5px proud
+  // Face: a plain flat-bottomed round pocket milled straight into the tower, with a small edge break.
+  // The floor is deep enough that the rim survives where the tower curves away at the sides.
+  const face = { cy: 142, floorZ: 19, lip: 2 };
   const merlons = 8, sector = (Math.PI * 2) / merlons;
   const f = (x, y, z) => {
     // core column and the three discs
@@ -399,23 +400,22 @@ function makeRook() {
     d = sd.smin(d, sd.cyl(x, y, z, 45, 43, 71, 4.5), 2);
     d = sd.smin(d, sd.cyl(x, y, z, 44.5, 84, 110, 4.5), 2);
     // tower head
-    d = sd.smin(d, sd.cyl(x, y, z, headR, 100, 191, 2.5), 3);
-    // a gently flattened front where the face sits, blended into the round tower
-    d = sd.smin(d, sd.box(x, y, z, 0, face.cy, face.frontZ - 14, 29, 28, 14, 13), 8);
+    d = sd.smin(d, sd.cyl(x, y, z, headR, 100, 191, 1.2), 3);
     // ears on both sides
-    d = sd.smin(d, sd.box(x, y, z, 37.5, 144.5, 0, 5, 13.5, 8, 3), 2);
-    d = sd.smin(d, sd.box(x, y, z, -37.5, 144.5, 0, 5, 13.5, 8, 3), 2);
-    // crenellations: a shallow well in the top and notches between the merlons
-    d = sd.smax(d, -sd.cyl(x, y, z, 23.5, 182, 230, 1.5), 1.5);
+    d = sd.smin(d, sd.box(x, y, z, 37.5, 144.5, 0, 5, 13.5, 8, 1.2), 1.4);
+    d = sd.smin(d, sd.box(x, y, z, -37.5, 144.5, 0, 5, 13.5, 8, 1.2), 1.4);
+    // crenellations: crisp, blocky merlons; the inner well and the notches share one floor height
+    const crownFloor = 179;
+    d = sd.smax(d, -sd.cyl(x, y, z, 23.5, crownFloor, 230, 0.6), 1.4);
     const a = Math.atan2(z, x);
     const notchA = Math.round(a / sector) * sector; // nearest notch (one sits dead centre above the face)
     const ca = Math.cos(-notchA), sa = Math.sin(-notchA);
     const lx = x * ca - z * sa, lz = x * sa + z * ca;
-    d = sd.smax(d, -sd.box(lx, y, lz, 40, 196, 0, 18, 17, 3.5, 1), 1.5);
+    d = sd.smax(d, -sd.box(lx, y, lz, 40, crownFloor + 20, 0, 18, 20, 3.5, 0.6), 1.4);
     // face opening
     return faceOpening(d, x, y, z, face);
   };
-  const geo = meshSDF(f, { min: [-50, -2, -50], max: [50, 194, 50], step: 0.8 });
+  const geo = meshSDF(f, { min: [-50, -2, -50], max: [50, 194, 50], step: 0.6 });
   geo.scale(PX, PX, PX);
   add(g, geo, stone);
   addMask(g, face);
