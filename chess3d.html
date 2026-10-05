@@ -10,14 +10,16 @@
 <style>
   /* Layout: full-bleed 3D scene; one quiet status line on top, one pill of actions at the bottom. */
   :root {
-    --ground: #1c1a17;      /* dim room around the table */
-    --ink: #ecebe7;         /* primary text */
-    --muted: #8e8a83;       /* secondary text */
-    --glass: rgba(28, 27, 25, 0.62);
-    --hair: rgba(255, 255, 255, 0.09);
-    --alert: #e0796b;
+    --ground: #f1f2f1;      /* white room */
+    --ink: #1e2023;         /* primary text */
+    --muted: #7d8187;       /* secondary text */
+    --glass: rgba(255, 255, 255, 0.72);
+    --hair: rgba(0, 0, 0, 0.08);
+    --press: rgba(0, 0, 0, 0.06);
+    --shadow: 0 6px 24px rgba(30, 34, 40, 0.10), 0 1px 2px rgba(30, 34, 40, 0.08);
+    --alert: #c4483a;
     --font: "Zen Kaku Gothic New", system-ui, -apple-system, "Hiragino Sans", sans-serif;
-    color-scheme: dark;
+    color-scheme: light;
   }
   html, body {
     margin: 0;
@@ -48,6 +50,7 @@
     padding: 8px 16px;
     border-radius: 999px;
     background: var(--glass);
+    box-shadow: var(--shadow);
     backdrop-filter: blur(10px);
     -webkit-backdrop-filter: blur(10px);
     letter-spacing: 0.06em;
@@ -57,7 +60,7 @@
   #dot {
     width: 10px; height: 10px;
     border-radius: 50%;
-    box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.35);
+    box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.25);
     transition: background 0.3s;
   }
   #dot.w { background: #f1e4cc; }
@@ -74,6 +77,7 @@
     padding: 4px;
     border-radius: 999px;
     background: var(--glass);
+    box-shadow: var(--shadow);
     backdrop-filter: blur(10px);
     -webkit-backdrop-filter: blur(10px);
   }
@@ -85,7 +89,7 @@
     letter-spacing: 0.06em;
     white-space: nowrap;
   }
-  #bar button:hover, #bar button[aria-expanded="true"] { background: rgba(255, 255, 255, 0.08); }
+  #bar button:hover, #bar button[aria-expanded="true"] { background: var(--press); }
   #bar button:disabled { color: var(--muted); opacity: 0.5; cursor: default; background: transparent; }
 
   #sheet {
@@ -101,12 +105,13 @@
     padding: 18px;
     border-radius: 22px;
     background: var(--glass);
+    box-shadow: var(--shadow);
     backdrop-filter: blur(14px);
     -webkit-backdrop-filter: blur(14px);
   }
   .field { display: flex; flex-direction: column; gap: 6px; }
   .field span { color: var(--muted); font-size: 12px; letter-spacing: 0.08em; }
-  .seg { display: flex; gap: 4px; padding: 3px; border-radius: 999px; background: rgba(0, 0, 0, 0.25); }
+  .seg { display: flex; gap: 4px; padding: 3px; border-radius: 999px; background: var(--press); }
   .seg button {
     flex: 1;
     border: 0;
@@ -116,7 +121,7 @@
     color: var(--muted);
     white-space: nowrap;
   }
-  .seg button[aria-pressed="true"] { background: rgba(255, 255, 255, 0.12); color: var(--ink); }
+  .seg button[aria-pressed="true"] { background: #fff; color: var(--ink); box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12); }
   #captured { display: flex; justify-content: space-between; font-size: 17px; min-height: 20px; color: var(--muted); letter-spacing: -1px; }
   #moves {
     margin: 0;
@@ -137,7 +142,7 @@
     position: fixed; inset: 0;
     display: none;
     align-items: center; justify-content: center;
-    background: rgba(10, 9, 8, 0.35);
+    background: rgba(241, 242, 241, 0.45);
     padding-inline: 16px;
   }
   #promo.show, #banner.show { display: flex; }
@@ -149,6 +154,7 @@
     padding: 22px 26px;
     border-radius: 24px;
     background: var(--glass);
+    box-shadow: var(--shadow);
     backdrop-filter: blur(14px);
     -webkit-backdrop-filter: blur(14px);
     text-align: center;
@@ -159,18 +165,18 @@
     width: 58px; height: 58px;
     border: 0;
     border-radius: 50%;
-    background: rgba(255, 255, 255, 0.08);
+    background: var(--press);
     font-size: 32px;
     line-height: 1;
   }
-  #promo button:hover { background: rgba(255, 255, 255, 0.16); }
+  #promo button:hover { background: rgba(0, 0, 0, 0.11); }
   #bannerText { font-size: 18px; font-weight: 500; }
   .card .row { display: flex; gap: 8px; }
   .card .row button {
     border: 0;
     border-radius: 999px;
     padding: 8px 18px;
-    background: rgba(255, 255, 255, 0.1);
+    background: var(--press);
   }
   .card .row button:first-child { background: var(--ink); color: var(--ground); }
 
@@ -605,11 +611,12 @@ renderer.setSize(innerWidth, innerHeight);
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.05;
 document.body.prepend(renderer.domElement);
 
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x1c1a17);
-scene.fog = new THREE.Fog(0x1c1a17, 12, 30);
+scene.background = new THREE.Color(0xf1f2f1);
+scene.fog = new THREE.Fog(0xf1f2f1, 14, 34);
 const pmrem = new THREE.PMREMGenerator(renderer);
 scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
 
@@ -621,9 +628,9 @@ controls.minDistance = 6;
 controls.maxDistance = 26;
 controls.maxPolarAngle = Math.PI * 0.46;
 
-// Low, warm side light like late-afternoon sun through a window.
-scene.add(new THREE.HemisphereLight(0xf4efe6, 0x2a2018, 0.45));
-const sun = new THREE.DirectionalLight(0xfff0da, 2.4);
+// Bright, even studio light with one key light for soft shadows.
+scene.add(new THREE.HemisphereLight(0xffffff, 0xd8dadc, 1.1));
+const sun = new THREE.DirectionalLight(0xffffff, 1.8);
 sun.position.set(-7, 8, 4);
 sun.castShadow = true;
 sun.shadow.mapSize.set(2048, 2048);
@@ -631,69 +638,6 @@ sun.shadow.radius = 4;
 Object.assign(sun.shadow.camera, { left: -8, right: 8, top: 8, bottom: -8, near: 1, far: 30 });
 sun.shadow.bias = -0.0004;
 scene.add(sun);
-
-// ---------- procedural textures ----------
-function canvasTex(w, h, paint) {
-  const cv = document.createElement('canvas');
-  cv.width = w; cv.height = h;
-  paint(cv.getContext('2d'), w, h);
-  const tex = new THREE.CanvasTexture(cv);
-  tex.colorSpace = THREE.SRGBColorSpace;
-  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
-  tex.anisotropy = 4;
-  return tex;
-}
-function grain(g, w, h, amount) {
-  const img = g.getImageData(0, 0, w, h);
-  for (let i = 0; i < img.data.length; i += 4) {
-    const n = (Math.random() - 0.5) * amount;
-    img.data[i] += n; img.data[i + 1] += n; img.data[i + 2] += n;
-  }
-  g.putImageData(img, 0, 0);
-}
-const concreteTex = canvasTex(512, 512, (g, w, h) => {
-  g.fillStyle = '#b4b8b5';
-  g.fillRect(0, 0, w, h);
-  for (let k = 0; k < 260; k++) {
-    const x = Math.random() * w, y = Math.random() * h, r = 20 + Math.random() * 90;
-    const grd = g.createRadialGradient(x, y, 0, x, y, r);
-    const light = Math.random() < 0.5;
-    grd.addColorStop(0, light ? 'rgba(235,238,236,0.07)' : 'rgba(80,86,84,0.06)');
-    grd.addColorStop(1, 'rgba(0,0,0,0)');
-    g.fillStyle = grd;
-    g.fillRect(x - r, y - r, r * 2, r * 2);
-  }
-  // a few faint veins
-  g.strokeStyle = 'rgba(230,232,230,0.18)';
-  for (let k = 0; k < 6; k++) {
-    g.lineWidth = 0.6 + Math.random();
-    g.beginPath();
-    let x = Math.random() * w, y = Math.random() * h;
-    g.moveTo(x, y);
-    for (let s = 0; s < 8; s++) { x += (Math.random() - 0.3) * 50; y += (Math.random() - 0.5) * 40; g.lineTo(x, y); }
-    g.stroke();
-  }
-  grain(g, w, h, 14);
-});
-const woodTex = canvasTex(1024, 256, (g, w, h) => {
-  g.fillStyle = '#5a3920';
-  g.fillRect(0, 0, w, h);
-  for (let y = 0; y < h; y += 1) {
-    const v = Math.sin(y * 0.09) * 0.5 + Math.sin(y * 0.023 + 1.3) * 0.5;
-    g.fillStyle = v > 0 ? `rgba(60,32,14,${v * 0.22})` : `rgba(150,104,66,${-v * 0.12})`;
-    g.fillRect(0, y, w, 1);
-  }
-  for (let k = 0; k < 140; k++) {
-    const y = Math.random() * h;
-    g.strokeStyle = `rgba(50,26,10,${0.05 + Math.random() * 0.1})`;
-    g.lineWidth = 0.5 + Math.random() * 1.5;
-    g.beginPath();
-    g.moveTo(0, y);
-    for (let x = 0; x <= w; x += 32) g.lineTo(x, y + Math.sin(x * 0.006 + k) * 3);
-    g.stroke();
-  }
-  grain(g, w, h, 10);
-});
 
 // ---------- board ----------
 function roundRect(w, h, r) {
@@ -717,24 +661,26 @@ const squares = [];
 const tints = [];
 const markers = [];
 
-// Concrete slab with soft, rounded edges.
+// Plastic slab with soft, rounded edges.
 const SLAB = 9.1, SLAB_T = 0.3, BEVEL = 0.1;
 const slabGeo = new THREE.ExtrudeGeometry(roundRect(SLAB - 2 * BEVEL, SLAB - 2 * BEVEL, 0.5), {
   depth: SLAB_T - 2 * BEVEL, bevelEnabled: true, bevelThickness: BEVEL, bevelSize: BEVEL,
   bevelSegments: 8, curveSegments: 24,
 });
 flat(slabGeo);
-concreteTex.repeat.set(1 / SLAB, 1 / SLAB);
-concreteTex.offset.set(0.5, 0.5);
-const slab = new THREE.Mesh(slabGeo, new THREE.MeshStandardMaterial({ map: concreteTex, roughness: 0.92 }));
+// Glossy plastic: smooth base with a clear lacquer layer that picks up reflections.
+const plastic = (color, roughness = 0.28) => new THREE.MeshPhysicalMaterial({
+  color, roughness, clearcoat: 1, clearcoatRoughness: 0.06, envMapIntensity: 1.1,
+});
+const slab = new THREE.Mesh(slabGeo, plastic(0xc5c9cd));
 slab.position.y = -(SLAB_T - BEVEL);
 slab.castShadow = true;
 slab.receiveShadow = true;
 scene.add(slab);
 
-// Dark squares are rounded inlays; light squares are the bare concrete.
+// Dark squares are rounded inlays; light squares are the bare slab.
 const tileGeo = flat(new THREE.ShapeGeometry(roundRect(0.84, 0.84, 0.13), 8));
-const inlayMat = new THREE.MeshStandardMaterial({ color: 0x2c2f31, roughness: 0.55 });
+const inlayMat = plastic(0x32373b, 0.22);
 const hitGeo = flat(new THREE.PlaneGeometry(1, 1));
 const hitMat = new THREE.MeshBasicMaterial({ visible: false });
 const dotGeo = flat(new THREE.CircleGeometry(0.13, 32));
@@ -766,36 +712,10 @@ for (let i = 0; i < 64; i++) {
   markers.push(mk);
 }
 
-woodTex.repeat.set(3, 12);
-const table = new THREE.Mesh(
-  flat(new THREE.PlaneGeometry(60, 60)),
-  new THREE.MeshStandardMaterial({ map: woodTex, roughness: 0.75, envMapIntensity: 0.4 })
-);
-table.material.map.rotation = Math.PI / 2;
+const table = new THREE.Mesh(flat(new THREE.PlaneGeometry(80, 80)), plastic(0xf4f5f4, 0.35));
 table.position.y = -SLAB_T;
 table.receiveShadow = true;
 scene.add(table);
-
-// Small engraved coordinates in the slab margin.
-function label(text, x, z, rot) {
-  const tex = canvasTex(64, 64, g => {
-    g.fillStyle = 'rgba(70,74,74,0.75)';
-    g.font = '500 30px "Zen Kaku Gothic New", system-ui, sans-serif';
-    g.textAlign = 'center';
-    g.textBaseline = 'middle';
-    g.fillText(text, 32, 34);
-  });
-  const m = new THREE.Mesh(flat(new THREE.PlaneGeometry(0.3, 0.3)), new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthWrite: false }));
-  m.rotation.y = rot;
-  m.position.set(x, 0.001, z);
-  scene.add(m);
-}
-for (let k = 0; k < 8; k++) {
-  label('abcdefgh'[k], k - 3.5, 4.22, 0);
-  label('abcdefgh'[k], k - 3.5, -4.22, Math.PI);
-  label(String(k + 1), -4.22, 3.5 - k, 0);
-  label(String(k + 1), 4.22, 3.5 - k, Math.PI);
-}
 
 // ---------- pieces ----------
 const pieceMats = {
