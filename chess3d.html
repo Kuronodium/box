@@ -4,147 +4,213 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <title>3D Chess</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Zen+Kaku+Gothic+New:wght@400;500&display=swap">
 <style>
+  /* Layout: full-bleed 3D scene; one quiet status line on top, one pill of actions at the bottom. */
   :root {
-    --panel: rgba(18, 20, 28, 0.82);
-    --line: rgba(255, 255, 255, 0.12);
-    --text: #ece8e1;
-    --muted: #a39e94;
-    --accent: #e9b15c;
+    --ground: #1c1a17;      /* dim room around the table */
+    --ink: #ecebe7;         /* primary text */
+    --muted: #8e8a83;       /* secondary text */
+    --glass: rgba(28, 27, 25, 0.62);
+    --hair: rgba(255, 255, 255, 0.09);
+    --alert: #e0796b;
+    --font: "Zen Kaku Gothic New", system-ui, -apple-system, "Hiragino Sans", sans-serif;
+    color-scheme: dark;
   }
   html, body {
     margin: 0;
     height: 100%;
     overflow: hidden;
-    background: #14161d;
-    color: var(--text);
-    font-family: system-ui, -apple-system, "Hiragino Sans", "Noto Sans JP", sans-serif;
+    background: var(--ground);
+    color: var(--ink);
+    font-family: var(--font);
+    font-size: 14px;
     touch-action: none;
     -webkit-user-select: none;
     user-select: none;
   }
   canvas { display: block; }
-  #hud {
+  [hidden] { display: none !important; }
+  button, select { font: inherit; color: inherit; }
+  button { cursor: pointer; }
+  :focus-visible { outline: 1px solid var(--ink); outline-offset: 2px; }
+
+  #status {
     position: fixed;
-    top: 12px; left: 12px;
-    width: 250px;
-    max-height: calc(100% - 24px);
+    top: calc(18px + env(safe-area-inset-top, 0px));
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 16px;
+    border-radius: 999px;
+    background: var(--glass);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    letter-spacing: 0.06em;
+    white-space: nowrap;
+    pointer-events: none;
+  }
+  #dot {
+    width: 10px; height: 10px;
+    border-radius: 50%;
+    box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.35);
+    transition: background 0.3s;
+  }
+  #dot.w { background: #f1e4cc; }
+  #dot.b { background: #2b2420; }
+  #status.alert #statusText { color: var(--alert); }
+
+  #bar {
+    position: fixed;
+    left: 50%;
+    bottom: calc(18px + env(safe-area-inset-bottom, 0px));
+    transform: translateX(-50%);
+    display: flex;
+    gap: 2px;
+    padding: 4px;
+    border-radius: 999px;
+    background: var(--glass);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+  }
+  #bar button {
+    border: 0;
+    background: transparent;
+    padding: 8px 16px;
+    border-radius: 999px;
+    letter-spacing: 0.06em;
+    white-space: nowrap;
+  }
+  #bar button:hover, #bar button[aria-expanded="true"] { background: rgba(255, 255, 255, 0.08); }
+  #bar button:disabled { color: var(--muted); opacity: 0.5; cursor: default; background: transparent; }
+
+  #sheet {
+    position: fixed;
+    left: 50%;
+    bottom: calc(72px + env(safe-area-inset-bottom, 0px));
+    transform: translateX(-50%);
+    width: min(320px, calc(100% - 32px));
+    box-sizing: border-box;
     display: flex;
     flex-direction: column;
-    gap: 10px;
-    padding: 14px;
-    box-sizing: border-box;
-    background: var(--panel);
-    border: 1px solid var(--line);
-    border-radius: 12px;
-    backdrop-filter: blur(6px);
-    font-size: 13px;
+    gap: 14px;
+    padding: 18px;
+    border-radius: 22px;
+    background: var(--glass);
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
   }
-  #hud h1 { margin: 0; font-size: 16px; letter-spacing: 2px; color: var(--accent); }
-  #status { font-size: 15px; font-weight: 600; min-height: 1.3em; }
-  #status.alert { color: #ff7a6b; }
-  label { white-space: nowrap; display: flex; justify-content: space-between; align-items: center; gap: 8px; color: var(--muted); }
-  select, button {
-    font: inherit;
-    color: var(--text);
-    background: #262a36;
-    border: 1px solid var(--line);
-    border-radius: 7px;
-    padding: 6px 8px;
+  .field { display: flex; flex-direction: column; gap: 6px; }
+  .field span { color: var(--muted); font-size: 12px; letter-spacing: 0.08em; }
+  .seg { display: flex; gap: 4px; padding: 3px; border-radius: 999px; background: rgba(0, 0, 0, 0.25); }
+  .seg button {
+    flex: 1;
+    border: 0;
+    background: transparent;
+    padding: 6px 4px;
+    border-radius: 999px;
+    color: var(--muted);
+    white-space: nowrap;
   }
-  label select { min-width: 0; max-width: 170px; }
-  button { cursor: pointer; flex: 1; }
-  button:hover { background: #313646; }
-  .btns { display: flex; gap: 6px; }
-  #captured { display: flex; flex-direction: column; gap: 2px; font-size: 20px; line-height: 1.1; min-height: 46px; }
-  #captured div { min-height: 22px; letter-spacing: -2px; }
+  .seg button[aria-pressed="true"] { background: rgba(255, 255, 255, 0.12); color: var(--ink); }
+  #captured { display: flex; justify-content: space-between; font-size: 17px; min-height: 20px; color: var(--muted); letter-spacing: -1px; }
   #moves {
     margin: 0;
-    padding: 6px 8px;
+    padding: 0;
     list-style: none;
+    max-height: 120px;
     overflow-y: auto;
-    min-height: 40px;
-    max-height: 220px;
-    background: rgba(0, 0, 0, 0.25);
-    border-radius: 7px;
+    font-size: 13px;
     font-variant-numeric: tabular-nums;
-    columns: 1;
+    border-top: 1px solid var(--hair);
+    padding-top: 10px;
   }
-  #moves li { display: grid; grid-template-columns: 28px 1fr 1fr; padding: 1px 0; }
+  #moves:empty::before { content: "まだ指し手はありません"; color: var(--muted); }
+  #moves li { display: grid; grid-template-columns: 30px 1fr 1fr; padding: 1px 0; }
   #moves li span:first-child { color: var(--muted); }
-  #hint { color: var(--muted); font-size: 11px; line-height: 1.5; }
-  #toggle { display: none; }
 
   #promo, #banner {
     position: fixed; inset: 0;
     display: none;
     align-items: center; justify-content: center;
-    background: rgba(0, 0, 0, 0.45);
+    background: rgba(10, 9, 8, 0.35);
+    padding-inline: 16px;
   }
   #promo.show, #banner.show { display: flex; }
   .card {
-    background: var(--panel);
-    border: 1px solid var(--line);
-    border-radius: 14px;
-    padding: 18px 22px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 16px;
+    padding: 22px 26px;
+    border-radius: 24px;
+    background: var(--glass);
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
     text-align: center;
   }
-  .card p { margin: 0 0 12px; font-size: 15px; }
-  #promo .opts { display: flex; gap: 10px; }
-  #promo button { font-size: 40px; width: 64px; height: 64px; padding: 0; line-height: 1; }
-  #banner .card p { font-size: 22px; font-weight: 700; color: var(--accent); }
-  #banner .btns { min-width: 240px; }
+  .card p { margin: 0; letter-spacing: 0.06em; }
+  #promo .opts { display: flex; gap: 8px; }
+  #promo button {
+    width: 58px; height: 58px;
+    border: 0;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.08);
+    font-size: 32px;
+    line-height: 1;
+  }
+  #promo button:hover { background: rgba(255, 255, 255, 0.16); }
+  #bannerText { font-size: 18px; font-weight: 500; }
+  .card .row { display: flex; gap: 8px; }
+  .card .row button {
+    border: 0;
+    border-radius: 999px;
+    padding: 8px 18px;
+    background: rgba(255, 255, 255, 0.1);
+  }
+  .card .row button:first-child { background: var(--ink); color: var(--ground); }
 
-  @media (max-width: 640px) {
-    #hud {
-      top: auto; bottom: 0; left: 0;
-      width: 100%;
-      border-radius: 12px 12px 0 0;
-      padding: 10px 12px calc(10px + env(safe-area-inset-bottom));
-      gap: 8px;
-    }
-    #hud h1, #hint { display: none; }
-    #toggle { display: block; flex: 0 0 auto; }
-    #hud.collapsed .more { display: none; }
-    #moves { max-height: 70px; }
-    .top { display: flex; align-items: center; gap: 8px; }
-    .top #status { flex: 1; }
+  @media (max-width: 420px) {
+    #bar button { padding: 8px 12px; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    * { transition: none !important; }
   }
 </style>
 </head>
 <body>
-<div id="hud">
-  <h1>3D CHESS</h1>
-  <div class="top">
-    <div id="status">白の番です</div>
-    <button id="toggle" aria-label="メニュー">☰</button>
+<div id="status"><i id="dot" class="w"></i><span id="statusText">白の番です</span></div>
+
+<div id="bar">
+  <button id="newBtn">新規</button>
+  <button id="undoBtn">待った</button>
+  <button id="flipBtn">視点</button>
+  <button id="toggle" aria-expanded="false" aria-controls="sheet">設定</button>
+</div>
+
+<div id="sheet" hidden>
+  <div class="field">
+    <span>対戦相手</span>
+    <div class="seg" id="modeSeg">
+      <button data-v="cpu-w" aria-pressed="true">CPU・白で</button>
+      <button data-v="cpu-b" aria-pressed="false">CPU・黒で</button>
+      <button data-v="pvp" aria-pressed="false">2人</button>
+    </div>
   </div>
-  <div class="more">
-    <label>モード
-      <select id="mode">
-        <option value="cpu-w">CPU と対戦（あなた: 白）</option>
-        <option value="cpu-b">CPU と対戦（あなた: 黒）</option>
-        <option value="pvp">2人で対戦</option>
-      </select>
-    </label>
+  <div class="field">
+    <span>CPU の強さ</span>
+    <div class="seg" id="levelSeg">
+      <button data-v="1" aria-pressed="false">よわい</button>
+      <button data-v="3" aria-pressed="true">ふつう</button>
+      <button data-v="4" aria-pressed="false">つよい</button>
+    </div>
   </div>
-  <div class="more">
-    <label>CPU の強さ
-      <select id="level">
-        <option value="1">よわい</option>
-        <option value="3" selected>ふつう</option>
-        <option value="4">つよい</option>
-      </select>
-    </label>
-  </div>
-  <div class="btns">
-    <button id="newBtn">新しいゲーム</button>
-    <button id="undoBtn">待った</button>
-    <button id="flipBtn">視点切替</button>
-  </div>
-  <div id="captured" class="more"><div id="capW"></div><div id="capB"></div></div>
-  <ol id="moves" class="more"></ol>
-  <div id="hint">駒をクリック → 移動先をクリック。<br>ドラッグで回転、ホイール/ピンチで拡大縮小。</div>
+  <div id="captured"><span id="capW"></span><span id="capB"></span></div>
+  <ol id="moves"></ol>
 </div>
 
 <div id="promo">
@@ -162,7 +228,7 @@
 <div id="banner">
   <div class="card">
     <p id="bannerText"></p>
-    <div class="btns">
+    <div class="row">
       <button id="bannerNew">もう一度</button>
       <button id="bannerClose">盤面を見る</button>
     </div>
@@ -542,8 +608,8 @@ renderer.toneMapping = THREE.ACESFilmicToneMapping;
 document.body.prepend(renderer.domElement);
 
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x14161d);
-scene.fog = new THREE.Fog(0x14161d, 18, 40);
+scene.background = new THREE.Color(0x1c1a17);
+scene.fog = new THREE.Fog(0x1c1a17, 12, 30);
 const pmrem = new THREE.PMREMGenerator(renderer);
 scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
 
@@ -555,86 +621,180 @@ controls.minDistance = 6;
 controls.maxDistance = 26;
 controls.maxPolarAngle = Math.PI * 0.46;
 
-scene.add(new THREE.HemisphereLight(0xfff4e0, 0x202030, 0.6));
-const sun = new THREE.DirectionalLight(0xffffff, 1.6);
-sun.position.set(4, 10, 6);
+// Low, warm side light like late-afternoon sun through a window.
+scene.add(new THREE.HemisphereLight(0xf4efe6, 0x2a2018, 0.45));
+const sun = new THREE.DirectionalLight(0xfff0da, 2.4);
+sun.position.set(-7, 8, 4);
 sun.castShadow = true;
 sun.shadow.mapSize.set(2048, 2048);
-Object.assign(sun.shadow.camera, { left: -7, right: 7, top: 7, bottom: -7, near: 1, far: 30 });
-sun.shadow.bias = -0.0005;
+sun.shadow.radius = 4;
+Object.assign(sun.shadow.camera, { left: -8, right: 8, top: 8, bottom: -8, near: 1, far: 30 });
+sun.shadow.bias = -0.0004;
 scene.add(sun);
 
+// ---------- procedural textures ----------
+function canvasTex(w, h, paint) {
+  const cv = document.createElement('canvas');
+  cv.width = w; cv.height = h;
+  paint(cv.getContext('2d'), w, h);
+  const tex = new THREE.CanvasTexture(cv);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  tex.anisotropy = 4;
+  return tex;
+}
+function grain(g, w, h, amount) {
+  const img = g.getImageData(0, 0, w, h);
+  for (let i = 0; i < img.data.length; i += 4) {
+    const n = (Math.random() - 0.5) * amount;
+    img.data[i] += n; img.data[i + 1] += n; img.data[i + 2] += n;
+  }
+  g.putImageData(img, 0, 0);
+}
+const concreteTex = canvasTex(512, 512, (g, w, h) => {
+  g.fillStyle = '#b4b8b5';
+  g.fillRect(0, 0, w, h);
+  for (let k = 0; k < 260; k++) {
+    const x = Math.random() * w, y = Math.random() * h, r = 20 + Math.random() * 90;
+    const grd = g.createRadialGradient(x, y, 0, x, y, r);
+    const light = Math.random() < 0.5;
+    grd.addColorStop(0, light ? 'rgba(235,238,236,0.07)' : 'rgba(80,86,84,0.06)');
+    grd.addColorStop(1, 'rgba(0,0,0,0)');
+    g.fillStyle = grd;
+    g.fillRect(x - r, y - r, r * 2, r * 2);
+  }
+  // a few faint veins
+  g.strokeStyle = 'rgba(230,232,230,0.18)';
+  for (let k = 0; k < 6; k++) {
+    g.lineWidth = 0.6 + Math.random();
+    g.beginPath();
+    let x = Math.random() * w, y = Math.random() * h;
+    g.moveTo(x, y);
+    for (let s = 0; s < 8; s++) { x += (Math.random() - 0.3) * 50; y += (Math.random() - 0.5) * 40; g.lineTo(x, y); }
+    g.stroke();
+  }
+  grain(g, w, h, 14);
+});
+const woodTex = canvasTex(1024, 256, (g, w, h) => {
+  g.fillStyle = '#5a3920';
+  g.fillRect(0, 0, w, h);
+  for (let y = 0; y < h; y += 1) {
+    const v = Math.sin(y * 0.09) * 0.5 + Math.sin(y * 0.023 + 1.3) * 0.5;
+    g.fillStyle = v > 0 ? `rgba(60,32,14,${v * 0.22})` : `rgba(150,104,66,${-v * 0.12})`;
+    g.fillRect(0, y, w, 1);
+  }
+  for (let k = 0; k < 140; k++) {
+    const y = Math.random() * h;
+    g.strokeStyle = `rgba(50,26,10,${0.05 + Math.random() * 0.1})`;
+    g.lineWidth = 0.5 + Math.random() * 1.5;
+    g.beginPath();
+    g.moveTo(0, y);
+    for (let x = 0; x <= w; x += 32) g.lineTo(x, y + Math.sin(x * 0.006 + k) * 3);
+    g.stroke();
+  }
+  grain(g, w, h, 10);
+});
+
 // ---------- board ----------
+function roundRect(w, h, r) {
+  const s = new THREE.Shape();
+  const x = -w / 2, y = -h / 2;
+  s.moveTo(x + r, y);
+  s.lineTo(x + w - r, y);
+  s.quadraticCurveTo(x + w, y, x + w, y + r);
+  s.lineTo(x + w, y + h - r);
+  s.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+  s.lineTo(x + r, y + h);
+  s.quadraticCurveTo(x, y + h, x, y + h - r);
+  s.lineTo(x, y + r);
+  s.quadraticCurveTo(x, y, x + r, y);
+  return s;
+}
+const flat = geo => geo.rotateX(-Math.PI / 2);
+
 const sqPos = i => new THREE.Vector3((i & 7) - 3.5, 0, 3.5 - (i >> 3));
 const squares = [];
 const tints = [];
 const markers = [];
-const lightMat = new THREE.MeshStandardMaterial({ color: 0xe9d4a8, roughness: 0.55 });
-const darkMat = new THREE.MeshStandardMaterial({ color: 0x8a5a3b, roughness: 0.5 });
-const sqGeo = new THREE.BoxGeometry(1, 0.1, 1);
-const planeGeo = new THREE.PlaneGeometry(1, 1);
-const dotGeo = new THREE.CircleGeometry(0.15, 28);
-const ringGeo = new THREE.RingGeometry(0.38, 0.47, 40);
-for (let i = 0; i < 64; i++) {
-  const light = ((i & 7) + (i >> 3)) % 2 === 1;
-  const m = new THREE.Mesh(sqGeo, light ? lightMat : darkMat);
-  m.position.copy(sqPos(i)).setY(-0.05);
-  m.receiveShadow = true;
-  m.userData.sq = i;
-  scene.add(m);
-  squares.push(m);
 
-  const t = new THREE.Mesh(planeGeo, new THREE.MeshBasicMaterial({ transparent: true, depthWrite: false }));
-  t.rotation.x = -Math.PI / 2;
-  t.position.copy(sqPos(i)).setY(0.002);
+// Concrete slab with soft, rounded edges.
+const SLAB = 9.1, SLAB_T = 0.3, BEVEL = 0.1;
+const slabGeo = new THREE.ExtrudeGeometry(roundRect(SLAB - 2 * BEVEL, SLAB - 2 * BEVEL, 0.5), {
+  depth: SLAB_T - 2 * BEVEL, bevelEnabled: true, bevelThickness: BEVEL, bevelSize: BEVEL,
+  bevelSegments: 8, curveSegments: 24,
+});
+flat(slabGeo);
+concreteTex.repeat.set(1 / SLAB, 1 / SLAB);
+concreteTex.offset.set(0.5, 0.5);
+const slab = new THREE.Mesh(slabGeo, new THREE.MeshStandardMaterial({ map: concreteTex, roughness: 0.92 }));
+slab.position.y = -(SLAB_T - BEVEL);
+slab.castShadow = true;
+slab.receiveShadow = true;
+scene.add(slab);
+
+// Dark squares are rounded inlays; light squares are the bare concrete.
+const tileGeo = flat(new THREE.ShapeGeometry(roundRect(0.84, 0.84, 0.13), 8));
+const inlayMat = new THREE.MeshStandardMaterial({ color: 0x2c2f31, roughness: 0.55 });
+const hitGeo = flat(new THREE.PlaneGeometry(1, 1));
+const hitMat = new THREE.MeshBasicMaterial({ visible: false });
+const dotGeo = flat(new THREE.CircleGeometry(0.13, 32));
+const ringGeo = flat(new THREE.RingGeometry(0.33, 0.4, 48));
+for (let i = 0; i < 64; i++) {
+  const dark = ((i & 7) + (i >> 3)) % 2 === 0;
+  if (dark) {
+    const inlay = new THREE.Mesh(tileGeo, inlayMat);
+    inlay.position.copy(sqPos(i)).setY(0.002);
+    inlay.receiveShadow = true;
+    scene.add(inlay);
+  }
+  const hit = new THREE.Mesh(hitGeo, hitMat);
+  hit.position.copy(sqPos(i));
+  hit.userData.sq = i;
+  scene.add(hit);
+  squares.push(hit);
+
+  const t = new THREE.Mesh(tileGeo, new THREE.MeshBasicMaterial({ transparent: true, depthWrite: false }));
+  t.position.copy(sqPos(i)).setY(0.004);
   t.visible = false;
   scene.add(t);
   tints.push(t);
 
   const mk = new THREE.Mesh(dotGeo, new THREE.MeshBasicMaterial({ transparent: true, depthWrite: false }));
-  mk.rotation.x = -Math.PI / 2;
-  mk.position.copy(sqPos(i)).setY(0.004);
+  mk.position.copy(sqPos(i)).setY(0.006);
   mk.visible = false;
   scene.add(mk);
   markers.push(mk);
 }
-const frame = new THREE.Mesh(
-  new THREE.BoxGeometry(9.1, 0.22, 9.1),
-  new THREE.MeshStandardMaterial({ color: 0x3b2418, roughness: 0.45 })
-);
-frame.position.y = -0.13;
-frame.receiveShadow = true;
-scene.add(frame);
+
+woodTex.repeat.set(3, 12);
 const table = new THREE.Mesh(
-  new THREE.CircleGeometry(30, 64),
-  new THREE.MeshStandardMaterial({ color: 0x1d2029, roughness: 0.9 })
+  flat(new THREE.PlaneGeometry(60, 60)),
+  new THREE.MeshStandardMaterial({ map: woodTex, roughness: 0.75, envMapIntensity: 0.4 })
 );
-table.rotation.x = -Math.PI / 2;
-table.position.y = -0.25;
+table.material.map.rotation = Math.PI / 2;
+table.position.y = -SLAB_T;
 table.receiveShadow = true;
 scene.add(table);
 
+// Small engraved coordinates in the slab margin.
 function label(text, x, z, rot) {
-  const cv = document.createElement('canvas');
-  cv.width = cv.height = 64;
-  const g = cv.getContext('2d');
-  g.fillStyle = '#d9c4a0';
-  g.font = 'bold 40px system-ui, sans-serif';
-  g.textAlign = 'center';
-  g.textBaseline = 'middle';
-  g.fillText(text, 32, 34);
-  const tex = new THREE.CanvasTexture(cv);
-  tex.colorSpace = THREE.SRGBColorSpace;
-  const m = new THREE.Mesh(new THREE.PlaneGeometry(0.32, 0.32), new THREE.MeshBasicMaterial({ map: tex, transparent: true }));
-  m.rotation.set(-Math.PI / 2, 0, rot);
-  m.position.set(x, -0.015, z);
+  const tex = canvasTex(64, 64, g => {
+    g.fillStyle = 'rgba(70,74,74,0.75)';
+    g.font = '500 30px "Zen Kaku Gothic New", system-ui, sans-serif';
+    g.textAlign = 'center';
+    g.textBaseline = 'middle';
+    g.fillText(text, 32, 34);
+  });
+  const m = new THREE.Mesh(flat(new THREE.PlaneGeometry(0.3, 0.3)), new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthWrite: false }));
+  m.rotation.y = rot;
+  m.position.set(x, 0.001, z);
   scene.add(m);
 }
 for (let k = 0; k < 8; k++) {
-  label('abcdefgh'[k], k - 3.5, 4.28, 0);
-  label('abcdefgh'[k], k - 3.5, -4.28, Math.PI);
-  label(String(k + 1), -4.28, 3.5 - k, 0);
-  label(String(k + 1), 4.28, 3.5 - k, Math.PI);
+  label('abcdefgh'[k], k - 3.5, 4.22, 0);
+  label('abcdefgh'[k], k - 3.5, -4.22, Math.PI);
+  label(String(k + 1), -4.22, 3.5 - k, 0);
+  label(String(k + 1), 4.22, 3.5 - k, Math.PI);
 }
 
 // ---------- pieces ----------
@@ -741,7 +901,21 @@ function addAnim(obj, dur, fn, { delay = 0, done } = {}) {
 let state, history, keys, selected, legal, over, thinking, lastMove;
 const meshes = new Map();
 const $ = id => document.getElementById(id);
-const modeSel = $('mode'), levelSel = $('level');
+// Segmented controls stand in for <select>s; each exposes .value like one.
+function segment(id, onChange) {
+  const el = $(id);
+  const ctl = { value: el.querySelector('[aria-pressed="true"]').dataset.v };
+  el.addEventListener('click', e => {
+    const b = e.target.closest('button');
+    if (!b || b.dataset.v === ctl.value) return;
+    ctl.value = b.dataset.v;
+    for (const x of el.querySelectorAll('button')) x.setAttribute('aria-pressed', String(x === b));
+    onChange && onChange();
+  });
+  return ctl;
+}
+const modeSel = segment('modeSeg', () => newGame());
+const levelSel = segment('levelSeg');
 const humanColor = () => (modeSel.value === 'cpu-b' ? 'b' : 'w');
 const isCpuTurn = () => modeSel.value !== 'pvp' && state.turn !== humanColor() && !over;
 
@@ -797,21 +971,21 @@ function setTint(i, color, opacity) {
 function refreshHighlights() {
   for (let i = 0; i < 64; i++) { tints[i].visible = false; markers[i].visible = false; }
   if (lastMove) {
-    setTint(lastMove.from, 0xf5d76e, 0.38);
-    setTint(lastMove.to, 0xf5d76e, 0.45);
+    setTint(lastMove.from, 0xe8d9b0, 0.28);
+    setTint(lastMove.to, 0xe8d9b0, 0.38);
   }
   if (C.inCheck(state, state.turn)) {
     const k = state.board.findIndex(p => p && p.t === 'k' && p.c === state.turn);
-    setTint(k, 0xff3b30, 0.6);
+    setTint(k, 0xc8574a, 0.65);
   }
   if (selected !== null) {
-    setTint(selected, 0x4fa3ff, 0.55);
+    setTint(selected, 0x8fb3c8, 0.55);
     for (const m of legal.filter(m => m.from === selected)) {
       const mk = markers[m.to];
       const capture = state.board[m.to] || m.ep;
       mk.geometry = capture ? ringGeo : dotGeo;
-      mk.material.color.set(capture ? 0xff6b5b : 0x2ecc71);
-      mk.material.opacity = 0.8;
+      mk.material.color.set(capture ? 0xc8574a : 0x5a6e66);
+      mk.material.opacity = 0.85;
       mk.visible = true;
     }
   }
@@ -822,16 +996,17 @@ const PIECE_CHAR = { w: { p: '♙', n: '♘', b: '♗', r: '♖', q: '♕' }, b:
 const NAME = { w: '白', b: '黒' };
 function updateUI() {
   const st = $('status');
+  const text = $('statusText');
+  $('dot').className = state.turn;
   st.classList.remove('alert');
   if (over) {
-    st.textContent = over;
+    text.textContent = over;
     st.classList.add('alert');
   } else if (thinking) {
-    st.textContent = 'CPU が考え中…';
+    text.textContent = 'CPU が考えています';
   } else {
-    const who = modeSel.value === 'pvp' ? NAME[state.turn] + 'の番です'
-      : state.turn === humanColor() ? 'あなたの番です（' + NAME[state.turn] + '）' : 'CPU の番です';
-    st.textContent = who + (C.inCheck(state, state.turn) ? ' — チェック！' : '');
+    const who = modeSel.value === 'pvp' ? NAME[state.turn] + 'の番' : state.turn === humanColor() ? 'あなたの番' : 'CPU の番';
+    text.textContent = who + (C.inCheck(state, state.turn) ? '・チェック' : '');
     if (C.inCheck(state, state.turn)) st.classList.add('alert');
   }
   // captured pieces
@@ -957,7 +1132,9 @@ function viewDist() {
 }
 function setView(side, animate) {
   viewSide = side;
-  const end = new THREE.Vector3(0, 9.5, side === 'w' ? 8.5 : -8.5).setLength(viewDist());
+  const portrait = camera.aspect < 0.8;
+  const z = portrait ? 5.5 : 8.5;
+  const end = new THREE.Vector3(0, portrait ? 13 : 9.5, side === 'w' ? z : -z).setLength(viewDist());
   if (!animate) {
     camera.position.copy(end);
     controls.target.set(0, 0, 0);
@@ -1036,9 +1213,11 @@ $('undoBtn').onclick = undo;
 $('flipBtn').onclick = () => setView(viewSide === 'w' ? 'b' : 'w', true);
 $('bannerNew').onclick = newGame;
 $('bannerClose').onclick = () => $('banner').classList.remove('show');
-$('toggle').onclick = () => $('hud').classList.toggle('collapsed');
-modeSel.onchange = newGame;
-if (matchMedia('(max-width: 640px)').matches) $('hud').classList.add('collapsed');
+$('toggle').onclick = () => {
+  const open = $('sheet').hidden;
+  $('sheet').hidden = !open;
+  $('toggle').setAttribute('aria-expanded', String(open));
+};
 
 addEventListener('resize', () => {
   camera.aspect = innerWidth / innerHeight;
