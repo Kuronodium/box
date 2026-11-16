@@ -1,0 +1,349 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>年賀状AR 箱展開 3Dプロト</title>
+<style>
+  :root{--bg:#0e1424;--fg:#f4ead2;--accent:#d7263d}
+  html,body{margin:0;height:100%;background:var(--bg);color:var(--fg);font-family:system-ui,"Hiragino Sans","Noto Sans JP",sans-serif;overflow:hidden;touch-action:none}
+  canvas{display:block;width:100%;height:100%}
+  #hud{position:fixed;inset:0;pointer-events:none;font-family:ui-monospace,"SF Mono",Menlo,Consolas,monospace;color:#7fe9ff;text-shadow:0 0 8px rgba(127,233,255,.6)}
+  #log{position:absolute;left:16px;top:44px;font-size:12px;line-height:1.7;letter-spacing:.08em}
+  #log div{opacity:.9}#log div:last-child{color:#ffe08a;text-shadow:0 0 8px rgba(255,224,138,.6)}
+  #count{position:absolute;right:16px;top:12px;font-size:12px;letter-spacing:.1em;text-align:right;opacity:0;transition:opacity .3s}
+  #reticle{position:absolute;left:50%;top:44%;width:min(46vw,260px);aspect-ratio:100/148;transform:translate(-50%,-50%);opacity:0}
+  #reticle i{position:absolute;width:22px;height:22px;border:2px solid #7fe9ff}
+  #reticle i:nth-child(1){left:0;top:0;border-right:0;border-bottom:0}#reticle i:nth-child(2){right:0;top:0;border-left:0;border-bottom:0}
+  #reticle i:nth-child(3){left:0;bottom:0;border-right:0;border-top:0}#reticle i:nth-child(4){right:0;bottom:0;border-left:0;border-top:0}
+  #reticle b{position:absolute;left:0;right:0;height:2px;background:linear-gradient(90deg,transparent,#7fe9ff,transparent);box-shadow:0 0 10px #7fe9ff}
+  #title{position:absolute;left:16px;top:12px;font-size:15px;font-weight:700;letter-spacing:.16em;color:#ffe08a;text-shadow:0 0 10px rgba(255,224,138,.55)}
+  #quiz{position:absolute;left:0;right:0;bottom:0;padding:48px 16px calc(18px + env(safe-area-inset-bottom));background:linear-gradient(transparent,rgba(6,10,22,.88) 55%);pointer-events:none;display:flex;flex-direction:column;gap:10px;align-items:center;opacity:0;transform:translateY(16px);transition:opacity .5s,transform .5s}
+  #quiz.show{opacity:1;transform:none}
+  #q{font-size:14px;letter-spacing:.1em}
+  #choices{display:flex;gap:10px;width:100%;max-width:480px}
+  #choices button{flex:1;pointer-events:none;font:inherit;font-size:16px;letter-spacing:.08em;color:#7fe9ff;background:rgba(10,18,36,.72);border:1.5px solid #7fe9ff;border-radius:10px;padding:14px 4px;box-shadow:0 0 12px rgba(127,233,255,.3) inset;cursor:pointer}
+  #quiz.show #choices button{pointer-events:auto}
+  #choices button small{display:block;font-size:11px;opacity:.7;margin-bottom:2px}
+  #choices button.ok{color:#9dffb0;border-color:#9dffb0;box-shadow:0 0 14px rgba(157,255,176,.5) inset}
+  #choices button.ng{color:#ff8b8b;border-color:#ff8b8b;opacity:.6}
+  #quiz.done #choices button{pointer-events:none}
+</style>
+</head>
+<body>
+<div id="hud">
+  <div id="reticle"><i></i><i></i><i></i><i></i><b></b></div>
+  <div id="title">NEW YEAR // 年賀状AR</div>
+  <div id="log"></div>
+  <div id="count"></div>
+  <div id="quiz">
+    <div id="q">2027年の干支は?</div>
+    <div id="choices">
+      <button data-i="0"><small>A</small>午年</button>
+      <button data-i="1"><small>B</small>未年</button>
+      <button data-i="2"><small>C</small>申年</button>
+    </div>
+  </div>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+(() => {
+  // ---------- 設定 ----------
+  const DUR = 7.4;            // 全体の長さ(秒)
+  const CW = 1, CD = 1.48, CH = 0.55;  // 年賀状(100x148mm)の比率の直方体: 幅, 奥行き, 高さ
+  const TILE = 0.5;           // 地模様1枚あたりの大きさ
+  const HALF = Math.PI / 2;
+  const clamp = (x, a = 0, b = 1) => Math.min(b, Math.max(a, x));
+  const lerp = (a, b, t) => a + (b - a) * t;
+  const easeOutCubic = t => 1 - Math.pow(1 - t, 3);
+  const easeInOut = t => t < .5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+  const bounce = t => { // easeOutBounce: パタッと落ちて小さく跳ねる
+    const n = 7.5625, d = 2.75;
+    if (t < 1 / d) return n * t * t;
+    if (t < 2 / d) return n * (t -= 1.5 / d) * t + .75;
+    if (t < 2.5 / d) return n * (t -= 2.25 / d) * t + .9375;
+    return n * (t -= 2.625 / d) * t + .984375;
+  };
+
+  // ---------- renderer / scene ----------
+  const renderer = new THREE.WebGLRenderer({ antialias: true });
+  renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+  renderer.outputEncoding = THREE.sRGBEncoding;
+  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  renderer.localClippingEnabled = true;   // 地面から「せり上がる」/ 面の広がりに使う
+  document.body.prepend(renderer.domElement);
+
+  const scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x0e1424);
+  const camera = new THREE.PerspectiveCamera(38, 1, .1, 200);
+
+  scene.add(new THREE.HemisphereLight(0xfff4e0, 0x25304f, .55));
+  const sun = new THREE.DirectionalLight(0xffffff, .75);
+  sun.position.set(-3, 6, 4);
+  sun.castShadow = true;
+  sun.shadow.mapSize.set(2048, 2048);
+  Object.assign(sun.shadow.camera, { left: -5, right: 5, top: 5, bottom: -5, near: 1, far: 20 });
+  sun.shadow.bias = -0.0005;
+  scene.add(sun);
+
+  // ---------- テクスチャ ----------
+  const serif = '"Hiragino Mincho ProN","Yu Mincho","Noto Serif JP",serif';
+  const setup = (t, repeat) => {
+    t.encoding = THREE.sRGBEncoding;
+    t.anisotropy = renderer.capabilities.getMaxAnisotropy();
+    if (repeat) t.wrapS = t.wrapT = THREE.RepeatWrapping;
+    return t;
+  };
+  // 年賀状本体(箱の底 = 元の年賀状の位置)
+  function makeCardTexture() {
+    const W = 540, H = 800;
+    const c = document.createElement('canvas'); c.width = W; c.height = H;
+    const g = c.getContext('2d');
+    const bg = g.createLinearGradient(0, 0, 0, H);
+    bg.addColorStop(0, '#fff7e6'); bg.addColorStop(1, '#f6e6c4');
+    g.fillStyle = bg; g.fillRect(0, 0, W, H);
+    g.strokeStyle = 'rgba(180,140,60,.28)'; g.lineWidth = 3;   // 青海波(下部)
+    for (let y = H - 190; y < H + 40; y += 30) for (let x = -40; x < W + 80; x += 60) {
+      const ox = ((y / 30) % 2) * 30;
+      for (let r = 10; r <= 30; r += 10) { g.beginPath(); g.arc(x + ox, y, r, Math.PI, 0); g.stroke(); }
+    }
+    g.fillStyle = '#d7263d'; g.beginPath(); g.arc(W / 2, 220, 130, 0, Math.PI * 2); g.fill();
+    g.fillStyle = '#fff7e6'; g.textAlign = 'center'; g.textBaseline = 'middle';
+    g.font = `900 104px ${serif}`; g.fillText('賀正', W / 2, 224);
+    g.fillStyle = '#7a1424';
+    g.font = `700 29px ${serif}`; g.fillText('あけましておめでとうございます', W / 2, 420);
+    g.font = `900 100px ${serif}`; g.fillText('2027', W / 2, 510);
+    g.font = `600 32px ${serif}`; g.fillText('令和九年　元旦', W / 2, 590);
+    g.strokeStyle = '#c9a24a'; g.lineWidth = 8; g.strokeRect(20, 20, W - 40, H - 40);
+    return setup(new THREE.CanvasTexture(c), false);
+  }
+  // 箱の内側~広がる面の共通地模様(継ぎ目なしタイル)
+  function makePatternTexture() {
+    const N = 256, c = document.createElement('canvas'); c.width = c.height = N;
+    const g = c.getContext('2d');
+    g.fillStyle = '#a8142a'; g.fillRect(0, 0, N, N);
+    g.lineWidth = 3;
+    const sp = 64;     // 青海波: 横64, 縦32ずつずらして重ねる(N を割り切るので周期的)
+    for (let row = -1; row <= N / 32 + 1; row++) for (let col = -2; col <= N / sp + 2; col++) {
+      const x = col * sp + (row % 2 ? sp / 2 : 0), y = row * 32 + 32;
+      for (let r = 8; r <= 32; r += 8) {
+        g.strokeStyle = r === 32 ? 'rgba(230,195,106,.9)' : 'rgba(230,195,106,.45)';
+        g.beginPath(); g.arc(x, y, r, Math.PI, 0); g.stroke();
+      }
+    }
+    return setup(new THREE.CanvasTexture(c), true);
+  }
+  const cardTex = makeCardTexture(), patTex = makePatternTexture();
+
+  // ---------- 地面(広い暗い面) / シルエット ----------
+  const ground = new THREE.Mesh(
+    new THREE.PlaneGeometry(80, 80).rotateX(-HALF),
+    new THREE.MeshStandardMaterial({ color: 0x070b18, roughness: .95 })
+  );
+  ground.position.y = -0.02;
+  ground.receiveShadow = true;
+  scene.add(ground);
+  const sil = new THREE.LineSegments(      // 年賀状の枠(投影のシルエット)
+    new THREE.EdgesGeometry(new THREE.PlaneGeometry(CW, CD).rotateX(-HALF)),
+    new THREE.LineBasicMaterial({ color: 0xf4ead2, transparent: true, opacity: .8 })
+  );
+  sil.position.y = -0.015;
+  scene.add(sil);
+
+  // ---------- パネル ----------
+  const clipPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+  const clipOpt = { clippingPlanes: [clipPlane], clipShadows: true };
+  const mCard = new THREE.MeshStandardMaterial({ map: cardTex, roughness: .85, ...clipOpt });
+  const mPat  = new THREE.MeshStandardMaterial({ map: patTex,  roughness: .7,  ...clipOpt });
+  const mOut  = new THREE.MeshStandardMaterial({ color: 0xc9a46c, roughness: .8, ...clipOpt });
+
+  // 平らに広げたときの中心 (cx,cz) を渡すと、地模様がワールド座標で連続するUVになる
+  function makePanel(w, d, cx, cz, card) {
+    const g = new THREE.Group();
+    const geoTop = new THREE.PlaneGeometry(w, d).rotateX(-HALF);
+    if (!card) {
+      const pos = geoTop.attributes.position, uv = geoTop.attributes.uv;
+      for (let i = 0; i < uv.count; i++) uv.setXY(i, (pos.getX(i) + cx) / TILE, -(pos.getZ(i) + cz) / TILE);
+    }
+    const top = new THREE.Mesh(geoTop, card ? mCard : mPat);
+    top.position.y = 0.002;
+    const bot = new THREE.Mesh(new THREE.PlaneGeometry(w, d).rotateX(HALF), mOut);
+    bot.position.y = -0.002;
+    for (const x of [top, bot]) { x.castShadow = true; x.receiveShadow = true; g.add(x); }
+    return g;
+  }
+
+  const assembly = new THREE.Group();   // せり上がる箱ひとまとまり
+  scene.add(assembly);
+  assembly.add(makePanel(CW, CD, 0, 0, true));   // 底 = 年賀状
+
+  function hinge(px, pz, w, d, ox, oz, cx, cz, parent = assembly) { // 蝶番ピボット + パネル
+    const pivot = new THREE.Group(); pivot.position.set(px, 0, pz);
+    const p = makePanel(w, d, cx, cz, false); p.position.set(ox, 0, oz);
+    pivot.add(p); parent.add(pivot);
+    return { pivot, panel: p };
+  }
+  const E = hinge( CW / 2, 0, CH, CD,  CH / 2, 0,  CW / 2 + CH / 2, 0);
+  const W = hinge(-CW / 2, 0, CH, CD, -CH / 2, 0, -(CW / 2 + CH / 2), 0);
+  const S = hinge(0,  CD / 2, CW, CH, 0,  CH / 2, 0,  CD / 2 + CH / 2);
+  const N = hinge(0, -CD / 2, CW, CH, 0, -CH / 2, 0, -(CD / 2 + CH / 2));
+  // 段ボール式の4枚フラップ: 東西(長辺側)が天面の中央で突き合わさり、南北は下に潜る
+  const FE = hinge( CH, 0, CW / 2, CD,  CW / 4, 0,  CW / 2 + CH + CW / 4, 0, E.pivot);
+  const FW = hinge(-CH, 0, CW / 2, CD, -CW / 4, 0, -(CW / 2 + CH + CW / 4), 0, W.pivot);
+  const FN = hinge(0, -CH, CW, CW / 2, 0, -CW / 4, 0, -(CD / 2 + CH + CW / 4), N.pivot);
+  const FS = hinge(0,  CH, CW, CW / 2, 0,  CW / 4, 0,  CD / 2 + CH + CW / 4, S.pivot);
+  FN.panel.position.y = FS.panel.position.y = 0.012;   // 閉じたとき東西フラップの下に収まる(Zファイト防止)
+
+  // ---------- 広がる面: 短辺(CW)角の正方形タイルが、内側の辺を蝶番にバタバタ倒れて外へ波のように広がる ----------
+  const GX = 3, GZ = 5;                        // 中心から ±3 / ±5 マス(7 x 11 マス)
+  const FINAL = { x0: -GX - .5, x1: GX + .5, z0: -GZ - .5, z1: GZ + .5 };
+  const NET = { x0: -(CW + CH), x1: CW + CH, z0: -(CD / 2 + CH + CW / 2), z1: CD / 2 + CH + CW / 2 };
+  const NETX = CW / 2 + CH + CW / 2;           // 展開した十字の半幅
+  const tileFrameMat = new THREE.MeshBasicMaterial({ color: 0xe6c36a });
+  const tileBackMat = new THREE.MeshStandardMaterial({ color: 0xc9a46c, roughness: .7 });
+  const hash = (i, j) => (((i * 73856093) ^ (j * 19349663)) >>> 0) % 100 / 100;
+  const tiles = [];
+  for (let i = -GX; i <= GX; i++) for (let j = -GZ; j <= GZ; j++) {
+    if ((Math.abs(i) <= 1 && j === 0) || (i === 0 && Math.abs(j) <= 1)) continue;   // 十字(展開した箱)の下は不要
+    const alongX = Math.abs(i) > Math.abs(j) * 0.7 || (j === 0);
+    const sgn = alongX ? Math.sign(i) : Math.sign(j);
+    const pivot = new THREE.Group(), inner = new THREE.Group();
+    pivot.position.set(alongX ? i - sgn * .5 : i, 0, alongX ? j : j - sgn * .5);
+    inner.position.set(alongX ? sgn * .5 : 0, 0, alongX ? 0 : sgn * .5);
+    const geo = new THREE.PlaneGeometry(.96, .96).rotateX(-HALF);
+    const pos = geo.attributes.position, uv = geo.attributes.uv;
+    for (let k = 0; k < uv.count; k++) uv.setXY(k, (pos.getX(k) + i) / TILE, -(pos.getZ(k) + j) / TILE);
+    const topMat = new THREE.MeshStandardMaterial({ map: patTex, roughness: .7, emissive: 0xffc860, emissiveIntensity: 0 });
+    const top = new THREE.Mesh(geo, topMat); top.position.y = 0.0006;
+    const frame = new THREE.Mesh(new THREE.PlaneGeometry(1, 1).rotateX(-HALF), tileFrameMat);
+    const back = new THREE.Mesh(new THREE.PlaneGeometry(1, 1).rotateX(HALF), tileBackMat); back.position.y = -0.001;
+    for (const m of [top, back]) m.receiveShadow = true;
+    inner.add(top, frame, back); pivot.add(inner); pivot.visible = false; scene.add(pivot);
+    const r = Math.hypot(i, j * 0.75);
+    tiles.push({ pivot, topMat, alongX, sgn, start: r * 0.17 + hash(i, j) * 0.1 });
+  }
+
+  // ---------- タイムライン ----------
+  const T = { rise: .3, riseDur: 1.5,
+              flap: { E: 2.2, W: 2.35, N: 2.55, S: 2.7 }, flapDur: .5,
+              fall: { E: 3.3, W: 3.5, S: 3.7, N: 3.9 }, fallDur: .85,
+              grow: 4.85, tileDur: .5, waveSpan: 1.4 };
+  const fallAngle = (t, s) => (1 - bounce(clamp((t - s) / T.fallDur))) * HALF;
+  const flapAngle = (t, s) => HALF * (1 - easeInOut(clamp((t - s) / T.flapDur)));
+  const waveK = t => clamp((t - T.grow) / T.waveSpan);   // 広がりの進み具合(カメラ追従用)
+
+  function update(t) {
+    const rise = easeOutCubic(clamp((t - T.rise) / T.riseDur));
+    assembly.position.y = -(CH + .05) * (1 - rise);
+    sil.material.opacity = .8 * (1 - clamp((t - T.fall.E) / .6));
+
+    FE.pivot.rotation.z =  flapAngle(t, T.flap.E);
+    FW.pivot.rotation.z = -flapAngle(t, T.flap.W);
+    FN.pivot.rotation.x =  flapAngle(t, T.flap.N);
+    FS.pivot.rotation.x = -flapAngle(t, T.flap.S);
+    E.pivot.rotation.z =  fallAngle(t, T.fall.E);
+    W.pivot.rotation.z = -fallAngle(t, T.fall.W);
+    S.pivot.rotation.x = -fallAngle(t, T.fall.S);
+    N.pivot.rotation.x =  fallAngle(t, T.fall.N);
+
+    for (const k of tiles) {
+      const u = (t - T.grow - k.start) / T.tileDur;
+      k.pivot.visible = u > 0;
+      if (u <= 0) continue;
+      const a = (1 - bounce(clamp(u))) * HALF * k.sgn;
+      if (k.alongX) k.pivot.rotation.z = a; else k.pivot.rotation.x = -a;
+      k.topMat.emissiveIntensity = .3 * (1 - clamp((u - .36) / .5)) * (u > .0 ? 1 : 0);  // 着地の瞬間にフッと光る
+    }
+    updateCamera(t); updateHud(t);
+  }
+
+
+  // ---------- HUD(画面固定のHTMLオーバーレイ。時刻 t だけで決まるのでスクラブでも整合) ----------
+  const hudLog = document.getElementById('log'), hudCount = document.getElementById('count'), reticle = document.getElementById('reticle');
+  const LOG = [[0, 'TARGET DETECTED // POSTCARD 100x148'], [.3, 'MATERIALIZING OBJECT'], [T.flap.E, 'SEAL RELEASED'],
+               [T.fall.E, 'UNFOLDING PANELS'], [T.grow, 'EXPANDING SURFACE'], [T.grow + T.waveSpan + .6, 'SURFACE STABLE']];
+  let hudKey = '';
+  function updateHud(t) {
+    const lines = LOG.filter(l => t >= l[0]).slice(-4).map(l => l[1]);
+    const key = lines.join('|');
+    if (key !== hudKey) { hudKey = key; hudLog.innerHTML = lines.map(x => `<div>&gt; ${x}</div>`).join(''); }
+    // スキャン枠: 出現中だけ。走査線が上から下へ
+    const sc = clamp(t / 0.3) * (1 - clamp((t - 2.0) / 0.4));
+    reticle.style.opacity = sc;
+    const bar = reticle.querySelector('b'); bar.style.top = (clamp(t / 1.8) * 100) + '%';
+    // タイル展開の進捗
+    const shown = tiles.filter(k => k.pivot.visible).length;
+    hudCount.style.opacity = t >= T.grow ? 1 : 0;
+    hudCount.textContent = `TILES ${String(shown).padStart(2, '0')} / ${tiles.length}`;
+  }
+
+  // ---------- カメラ(自動 + ドラッグ) ----------
+  let dAz = 0, dEl = 0;
+  const target = new THREE.Vector3();
+  function updateCamera(t) {
+    const p = easeInOut(clamp(t / (DUR - .3)));
+    const az = lerp(-0.35, 0, p) + dAz;
+    const el = clamp(lerp(0.46, 1.1, p) + dEl, 0.08, 1.5);
+    const aspect = innerWidth / innerHeight, th = Math.tan(camera.fov * Math.PI / 360);
+    // 見せたい範囲: 展開前の十字(おおよそ)と、現在の広がった面の大きいほう
+    const k = easeInOut(waveK(t));
+    const bx0 = lerp(-NETX, FINAL.x0, k), bx1 = lerp(NETX, FINAL.x1, k);
+    const bz0 = lerp(NET.z0, FINAL.z0, k), bz1 = lerp(NET.z1, FINAL.z1, k);
+    const hw = (bx1 - bx0) / 2 + 1, hd = (bz1 - bz0) / 2 + 1.8;
+    const dist = Math.max(6.2, hd / th, hw / (th * aspect));
+    const q = easeInOut(clamp(t / T.grow));        // 展開前は箱の近く、後は面の中心へ
+    target.set((bx0 + bx1) / 2, lerp(.3, 0, q), lerp(0, (bz0 + bz1) / 2, q));
+    camera.position.set(
+      target.x + dist * Math.sin(az) * Math.cos(el),
+      target.y + dist * Math.sin(el),
+      target.z + dist * Math.cos(az) * Math.cos(el));
+    camera.lookAt(target);
+  }
+  let drag = null;
+  addEventListener('pointerdown', e => { if (e.target.closest('#quiz')) return; drag = { x: e.clientX, y: e.clientY }; });
+  addEventListener('pointermove', e => {
+    if (!drag) return;
+    dAz -= (e.clientX - drag.x) * 0.006; dEl += (e.clientY - drag.y) * 0.006;
+    drag = { x: e.clientX, y: e.clientY }; render();
+  });
+  addEventListener('pointerup', () => drag = null);
+  addEventListener('pointercancel', () => drag = null);
+
+  // ---------- クイズ(広がりきったあとに出現) / ループ ----------
+  const $ = id => document.getElementById(id);
+  const quiz = $('quiz'), CORRECT = 1;            // 正解はB(未年)
+  let answered = false;
+  function resetQuiz() { answered = false; quiz.classList.remove('done'); quiz.querySelectorAll('button').forEach(b => b.className = ''); }
+  quiz.querySelectorAll('button').forEach(b => b.onclick = () => {
+    if (answered) return; answered = true; quiz.classList.add('done');
+    const i = +b.dataset.i;
+    b.classList.add(i === CORRECT ? 'ok' : 'ng');
+    if (i !== CORRECT) quiz.querySelector(`[data-i="${CORRECT}"]`).classList.add('ok');
+  });
+  let time = 0, playing = true, last = performance.now();
+  function restart() { time = 0; playing = true; resetQuiz(); }
+  addEventListener('keydown', e => { if (e.key === 'r' || e.key === 'R') restart(); });   // 確認用: Rで最初から
+  function render() {
+    update(time);
+    quiz.classList.toggle('show', time >= T.grow + T.waveSpan + .6);
+    renderer.render(scene, camera);
+  }
+  function resize() {
+    renderer.setSize(innerWidth, innerHeight);
+    camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); render();
+  }
+  addEventListener('resize', resize);
+  function loop(now) {
+    const dt = Math.min(.05, (now - last) / 1000); last = now;
+    if (playing) { time = Math.min(DUR, time + dt); if (time >= DUR) playing = false; }
+    render(); requestAnimationFrame(loop);
+  }
+  // テスト用: ?t=3.5 で固定フレーム
+  const q = new URLSearchParams(location.search);
+  if (q.has('t')) { time = +q.get('t'); playing = false; }
+  resize(); requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>
