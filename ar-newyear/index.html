@@ -14,10 +14,24 @@
   #seek{flex:1;accent-color:var(--accent)}
   #label{position:fixed;top:12px;left:16px;font-size:13px;opacity:.75;letter-spacing:.05em}
   #phase{font-variant-numeric:tabular-nums;font-size:13px;min-width:4.5em;text-align:right;opacity:.8}
+  #hud{position:fixed;inset:0;pointer-events:none;font-family:ui-monospace,"SF Mono",Menlo,Consolas,monospace;color:#7fe9ff;text-shadow:0 0 8px rgba(127,233,255,.6)}
+  #log{position:absolute;left:16px;top:40px;font-size:12px;line-height:1.7;letter-spacing:.08em}
+  #log div{opacity:.9}#log div:last-child{color:#ffe08a;text-shadow:0 0 8px rgba(255,224,138,.6)}
+  #count{position:absolute;right:16px;top:12px;font-size:12px;letter-spacing:.1em;text-align:right;opacity:0;transition:opacity .3s}
+  #reticle{position:absolute;left:50%;top:44%;width:min(46vw,260px);aspect-ratio:100/148;transform:translate(-50%,-50%);opacity:0}
+  #reticle i{position:absolute;width:22px;height:22px;border:2px solid #7fe9ff}
+  #reticle i:nth-child(1){left:0;top:0;border-right:0;border-bottom:0}#reticle i:nth-child(2){right:0;top:0;border-left:0;border-bottom:0}
+  #reticle i:nth-child(3){left:0;bottom:0;border-right:0;border-top:0}#reticle i:nth-child(4){right:0;bottom:0;border-left:0;border-top:0}
+  #reticle b{position:absolute;left:0;right:0;height:2px;background:linear-gradient(90deg,transparent,#7fe9ff,transparent);box-shadow:0 0 10px #7fe9ff}
 </style>
 </head>
 <body>
 <div id="label">年賀状AR プロト / ドラッグで視点回転</div>
+<div id="hud">
+  <div id="reticle"><i></i><i></i><i></i><i></i><b></b></div>
+  <div id="log"></div>
+  <div id="count"></div>
+</div>
 <div id="ui">
   <button id="play" aria-label="再生/一時停止">⏸</button>
   <button id="replay" aria-label="最初から">⟲</button>
@@ -234,8 +248,28 @@
       if (k.alongX) k.pivot.rotation.z = a; else k.pivot.rotation.x = -a;
       k.topMat.emissiveIntensity = .3 * (1 - clamp((u - .36) / .5)) * (u > .0 ? 1 : 0);  // 着地の瞬間にフッと光る
     }
-    updateCamera(t);
+    updateCamera(t); updateHud(t);
     phaseEl.textContent = t < T.fall.E ? '① せり上がり・開封' : t < T.grow ? '② 展開(パタッ)' : '③ 面が広がる';
+  }
+
+
+  // ---------- HUD(画面固定のHTMLオーバーレイ。時刻 t だけで決まるのでスクラブでも整合) ----------
+  const hudLog = document.getElementById('log'), hudCount = document.getElementById('count'), reticle = document.getElementById('reticle');
+  const LOG = [[0, 'TARGET DETECTED // POSTCARD 100x148'], [.3, 'MATERIALIZING OBJECT'], [T.flap.E, 'SEAL RELEASED'],
+               [T.fall.E, 'UNFOLDING PANELS'], [T.grow, 'EXPANDING SURFACE'], [T.grow + T.waveSpan + .6, 'SURFACE STABLE']];
+  let hudKey = '';
+  function updateHud(t) {
+    const lines = LOG.filter(l => t >= l[0]).slice(-4).map(l => l[1]);
+    const key = lines.join('|');
+    if (key !== hudKey) { hudKey = key; hudLog.innerHTML = lines.map(x => `<div>&gt; ${x}</div>`).join(''); }
+    // スキャン枠: 出現中だけ。走査線が上から下へ
+    const sc = clamp(t / 0.3) * (1 - clamp((t - 2.0) / 0.4));
+    reticle.style.opacity = sc;
+    const bar = reticle.querySelector('b'); bar.style.top = (clamp(t / 1.8) * 100) + '%';
+    // タイル展開の進捗
+    const shown = tiles.filter(k => k.pivot.visible).length;
+    hudCount.style.opacity = t >= T.grow ? 1 : 0;
+    hudCount.textContent = `TILES ${String(shown).padStart(2, '0')} / ${tiles.length}`;
   }
 
   // ---------- カメラ(自動 + ドラッグ) ----------
