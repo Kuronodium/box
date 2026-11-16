@@ -28,14 +28,14 @@
 <script>
 (() => {
   // ---------- 設定 ----------
-  const DUR = 6.6;            // 全体の長さ(秒)
-  const COLS = 3, ROWS = 4;   // 最終的な面は 3x4 マス(はがき縦ぐらいの比率)
+  const DUR = 7.8;            // 全体の長さ(秒)
+  const CW = 1, CD = 1.48, CH = 0.55;  // 年賀状(100x148mm)の比率の直方体: 幅, 奥行き, 高さ
+  const TILE = 0.5;           // 地模様1枚あたりの大きさ
   const HALF = Math.PI / 2;
   const clamp = (x, a = 0, b = 1) => Math.min(b, Math.max(a, x));
   const lerp = (a, b, t) => a + (b - a) * t;
   const easeOutCubic = t => 1 - Math.pow(1 - t, 3);
   const easeInOut = t => t < .5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
-  const easeOutBack = t => { const c1 = 1.70158, c3 = c1 + 1; return 1 + c3 * Math.pow(t - 1, 3) + c1 * Math.pow(t - 1, 2); };
   const bounce = t => { // easeOutBounce: パタッと落ちて小さく跳ねる
     const n = 7.5625, d = 2.75;
     if (t < 1 / d) return n * t * t;
@@ -50,14 +50,14 @@
   renderer.outputEncoding = THREE.sRGBEncoding;
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-  renderer.localClippingEnabled = true;   // 地面から「せり上がる」表現に使う
+  renderer.localClippingEnabled = true;   // 地面から「せり上がる」/ 面の広がりに使う
   document.body.prepend(renderer.domElement);
 
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0x0e1424);
-  const camera = new THREE.PerspectiveCamera(38, 1, .1, 100);
+  const camera = new THREE.PerspectiveCamera(38, 1, .1, 200);
 
-  scene.add(new THREE.HemisphereLight(0xfff4e0, 0x25304f, .5));
+  scene.add(new THREE.HemisphereLight(0xfff4e0, 0x25304f, .55));
   const sun = new THREE.DirectionalLight(0xffffff, .75);
   sun.position.set(-3, 6, 4);
   sun.castShadow = true;
@@ -66,55 +66,65 @@
   sun.shadow.bias = -0.0005;
   scene.add(sun);
 
-  // ---------- 年賀状テクスチャ(3x4マス分を1枚絵で) ----------
+  // ---------- テクスチャ ----------
+  const serif = '"Hiragino Mincho ProN","Yu Mincho","Noto Serif JP",serif';
+  const setup = (t, repeat) => {
+    t.encoding = THREE.sRGBEncoding;
+    t.anisotropy = renderer.capabilities.getMaxAnisotropy();
+    if (repeat) t.wrapS = t.wrapT = THREE.RepeatWrapping;
+    return t;
+  };
+  // 年賀状本体(箱の底 = 元の年賀状の位置)
   function makeCardTexture() {
-    const cell = 256, W = cell * COLS, H = cell * ROWS;
+    const W = 540, H = 800;
     const c = document.createElement('canvas'); c.width = W; c.height = H;
     const g = c.getContext('2d');
     const bg = g.createLinearGradient(0, 0, 0, H);
     bg.addColorStop(0, '#fff7e6'); bg.addColorStop(1, '#f6e6c4');
     g.fillStyle = bg; g.fillRect(0, 0, W, H);
-    // 青海波っぽい模様(下部)
-    g.strokeStyle = 'rgba(180,140,60,.28)'; g.lineWidth = 3;
-    for (let y = H - 330; y < H + 40; y += 34) {
-      for (let x = -40; x < W + 80; x += 68) {
-        const ox = ((y / 34) % 2) * 34;
-        for (let r = 12; r <= 34; r += 11) { g.beginPath(); g.arc(x + ox, y, r, Math.PI, 0); g.stroke(); }
+    g.strokeStyle = 'rgba(180,140,60,.28)'; g.lineWidth = 3;   // 青海波(下部)
+    for (let y = H - 190; y < H + 40; y += 30) for (let x = -40; x < W + 80; x += 60) {
+      const ox = ((y / 30) % 2) * 30;
+      for (let r = 10; r <= 30; r += 10) { g.beginPath(); g.arc(x + ox, y, r, Math.PI, 0); g.stroke(); }
+    }
+    g.fillStyle = '#d7263d'; g.beginPath(); g.arc(W / 2, 220, 130, 0, Math.PI * 2); g.fill();
+    g.fillStyle = '#fff7e6'; g.textAlign = 'center'; g.textBaseline = 'middle';
+    g.font = `900 104px ${serif}`; g.fillText('賀正', W / 2, 224);
+    g.fillStyle = '#7a1424';
+    g.font = `700 29px ${serif}`; g.fillText('あけましておめでとうございます', W / 2, 420);
+    g.font = `900 100px ${serif}`; g.fillText('2027', W / 2, 510);
+    g.font = `600 32px ${serif}`; g.fillText('令和九年　元旦', W / 2, 590);
+    g.strokeStyle = '#c9a24a'; g.lineWidth = 8; g.strokeRect(20, 20, W - 40, H - 40);
+    return setup(new THREE.CanvasTexture(c), false);
+  }
+  // 箱の内側~広がる面の共通地模様(継ぎ目なしタイル)
+  function makePatternTexture() {
+    const N = 256, c = document.createElement('canvas'); c.width = c.height = N;
+    const g = c.getContext('2d');
+    g.fillStyle = '#a8142a'; g.fillRect(0, 0, N, N);
+    g.lineWidth = 3;
+    const sp = 64;     // 青海波: 横64, 縦32ずつずらして重ねる(N を割り切るので周期的)
+    for (let row = -1; row <= N / 32 + 1; row++) for (let col = -2; col <= N / sp + 2; col++) {
+      const x = col * sp + (row % 2 ? sp / 2 : 0), y = row * 32 + 32;
+      for (let r = 8; r <= 32; r += 8) {
+        g.strokeStyle = r === 32 ? 'rgba(230,195,106,.9)' : 'rgba(230,195,106,.45)';
+        g.beginPath(); g.arc(x, y, r, Math.PI, 0); g.stroke();
       }
     }
-    // 日の丸 + 賀正
-    g.fillStyle = '#d7263d'; g.beginPath(); g.arc(W / 2, 330, 190, 0, Math.PI * 2); g.fill();
-    const serif = '"Hiragino Mincho ProN","Yu Mincho","Noto Serif JP",serif';
-    g.fillStyle = '#fff7e6'; g.textAlign = 'center'; g.textBaseline = 'middle';
-    g.font = `900 150px ${serif}`; g.fillText('賀正', W / 2, 335);
-    g.fillStyle = '#7a1424';
-    g.font = `700 46px ${serif}`; g.fillText('あけましておめでとうございます', W / 2, 600);
-    g.font = `900 130px ${serif}`; g.fillText('2027', W / 2, 740);
-    g.font = `600 42px ${serif}`; g.fillText('令和九年　元旦', W / 2, 850);
-    // 枠
-    g.strokeStyle = '#c9a24a'; g.lineWidth = 10; g.strokeRect(24, 24, W - 48, H - 48);
-    // マスの継ぎ目(うっすら)
-    g.strokeStyle = 'rgba(122,20,36,.14)'; g.lineWidth = 2;
-    for (let i = 1; i < COLS; i++) { g.beginPath(); g.moveTo(i * cell, 0); g.lineTo(i * cell, H); g.stroke(); }
-    for (let j = 1; j < ROWS; j++) { g.beginPath(); g.moveTo(0, j * cell); g.lineTo(W, j * cell); g.stroke(); }
-    const t = new THREE.CanvasTexture(c);
-    t.encoding = THREE.sRGBEncoding;
-    t.anisotropy = renderer.capabilities.getMaxAnisotropy();
-    return t;
+    return setup(new THREE.CanvasTexture(c), true);
   }
-  const tex = makeCardTexture();
+  const cardTex = makeCardTexture(), patTex = makePatternTexture();
 
-  // ---------- 地面(カード) ----------
+  // ---------- 地面(広い暗い面) / シルエット ----------
   const ground = new THREE.Mesh(
-    new THREE.PlaneGeometry(5.2, 6.4).rotateX(-HALF),
-    new THREE.MeshStandardMaterial({ color: 0x10172e, roughness: .95 })
+    new THREE.PlaneGeometry(80, 80).rotateX(-HALF),
+    new THREE.MeshStandardMaterial({ color: 0x070b18, roughness: .95 })
   );
-  ground.position.set(0, -0.02, -0.5);
+  ground.position.y = -0.02;
   ground.receiveShadow = true;
   scene.add(ground);
-  // 投影のシルエット(箱の足跡)
-  const sil = new THREE.LineSegments(
-    new THREE.EdgesGeometry(new THREE.PlaneGeometry(1, 1).rotateX(-HALF)),
+  const sil = new THREE.LineSegments(      // 年賀状の枠(投影のシルエット)
+    new THREE.EdgesGeometry(new THREE.PlaneGeometry(CW, CD).rotateX(-HALF)),
     new THREE.LineBasicMaterial({ color: 0xf4ead2, transparent: true, opacity: .8 })
   );
   sil.position.y = -0.015;
@@ -122,70 +132,71 @@
 
   // ---------- パネル ----------
   const clipPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
-  function mats(clip) {
-    const o = clip ? { clippingPlanes: [clipPlane], clipShadows: true } : {};
-    return {
-      top: new THREE.MeshStandardMaterial({ map: tex, roughness: .85, ...o }),
-      out: new THREE.MeshStandardMaterial({ color: 0xb3162b, roughness: .55, metalness: .1, ...o }),
-    };
-  }
-  const M_CLIP = mats(true), M_FREE = mats(false);
+  const clipOpt = { clippingPlanes: [clipPlane], clipShadows: true };
+  const mCard = new THREE.MeshStandardMaterial({ map: cardTex, roughness: .85, ...clipOpt });
+  const mPat  = new THREE.MeshStandardMaterial({ map: patTex,  roughness: .7,  ...clipOpt });
+  const mOut  = new THREE.MeshStandardMaterial({ color: 0xf3e7cd, roughness: .7, ...clipOpt });
 
-  // (col,row) のマスに対応する UV を貼ったパネル。平らのとき +Y が表(絵)、-Y が裏(赤)。
-  function makePanel(col, row, m) {
+  // 平らに広げたときの中心 (cx,cz) を渡すと、地模様がワールド座標で連続するUVになる
+  function makePanel(w, d, cx, cz, card) {
     const g = new THREE.Group();
-    const geoTop = new THREE.PlaneGeometry(1, 1).rotateX(-HALF);
-    const uv = geoTop.attributes.uv;
-    const du = 1 / COLS, dv = 1 / ROWS, u0 = col * du, v0 = 1 - (row + 1) * dv;
-    for (let i = 0; i < uv.count; i++) uv.setXY(i, u0 + uv.getX(i) * du, v0 + uv.getY(i) * dv);
-    const top = new THREE.Mesh(geoTop, m.top);
+    const geoTop = new THREE.PlaneGeometry(w, d).rotateX(-HALF);
+    if (!card) {
+      const pos = geoTop.attributes.position, uv = geoTop.attributes.uv;
+      for (let i = 0; i < uv.count; i++) uv.setXY(i, (pos.getX(i) + cx) / TILE, -(pos.getZ(i) + cz) / TILE);
+    }
+    const top = new THREE.Mesh(geoTop, card ? mCard : mPat);
     top.position.y = 0.002;
-    const bot = new THREE.Mesh(new THREE.PlaneGeometry(1, 1).rotateX(HALF), m.out);
+    const bot = new THREE.Mesh(new THREE.PlaneGeometry(w, d).rotateX(HALF), mOut);
     bot.position.y = -0.002;
     for (const x of [top, bot]) { x.castShadow = true; x.receiveShadow = true; g.add(x); }
     return g;
   }
-  // マス座標 → ワールド座標(中央の底面が原点、行は北=-z 方向へ)
-  const cellPos = (col, row) => new THREE.Vector3(col - 1, 0, row - 2);
 
-  // 箱本体(せり上がるまとまり)
-  const assembly = new THREE.Group();
+  const assembly = new THREE.Group();   // せり上がる箱ひとまとまり
   scene.add(assembly);
-  assembly.add(makePanel(1, 2, M_CLIP));                       // 底
+  assembly.add(makePanel(CW, CD, 0, 0, true));   // 底 = 年賀状
 
-  function hinge(px, pz, col, row, ox, oz, parent = assembly) { // 蝶番ピボット + パネル
+  function hinge(px, pz, w, d, ox, oz, cx, cz, parent = assembly) { // 蝶番ピボット + パネル
     const pivot = new THREE.Group(); pivot.position.set(px, 0, pz);
-    const p = makePanel(col, row, M_CLIP); p.position.set(ox, 0, oz);
+    const p = makePanel(w, d, cx, cz, false); p.position.set(ox, 0, oz);
     pivot.add(p); parent.add(pivot);
     return { pivot, panel: p };
   }
-  const E = hinge(.5, 0, 2, 2, .5, 0);
-  const W = hinge(-.5, 0, 0, 2, -.5, 0);
-  const S = hinge(0, .5, 1, 3, 0, .5);
-  const N = hinge(0, -.5, 1, 1, 0, -.5);
-  // フタ: 北の壁の先端(壁ローカルで z=-1)に蝶番
-  const L = hinge(0, -1, 1, 0, 0, -.5, N.pivot);
+  const E = hinge( CW / 2, 0, CH, CD,  CH / 2, 0,  CW / 2 + CH / 2, 0);
+  const W = hinge(-CW / 2, 0, CH, CD, -CH / 2, 0, -(CW / 2 + CH / 2), 0);
+  const S = hinge(0,  CD / 2, CW, CH, 0,  CH / 2, 0,  CD / 2 + CH / 2);
+  const N = hinge(0, -CD / 2, CW, CH, 0, -CH / 2, 0, -(CD / 2 + CH / 2));
+  const L = hinge(0, -CH, CW, CD, 0, -CD / 2, 0, -(CD + CH), N.pivot);  // フタは北の壁の先端に蝶番
 
-  // 残りの6マス(展開後に面を広げる)
-  const fillers = [];
-  for (const [col, row] of [[0, 0], [2, 0], [0, 1], [2, 1], [0, 3], [2, 3]]) {
-    const g = new THREE.Group();
-    g.position.copy(cellPos(col, row));
-    g.add(makePanel(col, row, M_FREE));
-    g.scale.set(0.0001, 1, 0.0001);
-    scene.add(g);
-    const d = Math.hypot(col - 1, row - 2);       // 中心から遠いほど遅れて出る
-    fillers.push({ g, delay: 0.1 * d });
+  // ---------- 広がる面(地模様。クリップ平面4枚で矩形を外へ広げる) ----------
+  const FINAL = { x0: -3.8, x1: 3.8, z0: -6.3, z1: 4.9 };       // 最終の面(年賀状の約 7 倍幅)
+  const rect = { x0: -CW / 2, x1: CW / 2, z0: -CD / 2, z1: CD / 2 }; // 最初は年賀状と同じ大きさ
+  const sheetPlanes = [
+    new THREE.Plane(new THREE.Vector3( 1, 0, 0), 0), new THREE.Plane(new THREE.Vector3(-1, 0, 0), 0),
+    new THREE.Plane(new THREE.Vector3(0, 0,  1), 0), new THREE.Plane(new THREE.Vector3(0, 0, -1), 0)];
+  const sheetGeo = new THREE.PlaneGeometry(FINAL.x1 - FINAL.x0 + 2, FINAL.z1 - FINAL.z0 + 2).rotateX(-HALF);
+  {
+    const pos = sheetGeo.attributes.position, uv = sheetGeo.attributes.uv;
+    for (let i = 0; i < uv.count; i++) uv.setXY(i, pos.getX(i) / TILE, -pos.getZ(i) / TILE);
+  }
+  const sheet = new THREE.Mesh(sheetGeo, new THREE.MeshStandardMaterial({ map: patTex, roughness: .7, clippingPlanes: sheetPlanes }));
+  sheet.position.set((FINAL.x0 + FINAL.x1) / 2, 0.0005, (FINAL.z0 + FINAL.z1) / 2);
+  sheet.receiveShadow = true;
+  scene.add(sheet);
+  function setRect(r) {
+    sheetPlanes[0].constant = -r.x0; sheetPlanes[1].constant = r.x1;
+    sheetPlanes[2].constant = -r.z0; sheetPlanes[3].constant = r.z1;
   }
 
   // ---------- タイムライン ----------
   const T = { rise: .3, riseDur: 1.5, lid: 2.3, lidDur: .6,
-              fall: { E: 2.9, W: 3.15, S: 3.4, N: 3.7 }, fallDur: .85, fill: 4.9, fillDur: .55 };
+              fall: { E: 2.9, W: 3.15, S: 3.4, N: 3.7 }, fallDur: .85, grow: 4.5, growDur: 2.6 };
   const fallAngle = (t, s) => (1 - bounce(clamp((t - s) / T.fallDur))) * HALF;
 
   function update(t) {
     const rise = easeOutCubic(clamp((t - T.rise) / T.riseDur));
-    assembly.position.y = -1.05 * (1 - rise);
+    assembly.position.y = -(CH + .05) * (1 - rise);
     sil.material.opacity = .8 * (1 - clamp((t - T.fall.E) / .6));
 
     L.pivot.rotation.x = HALF * (1 - easeInOut(clamp((t - T.lid) / T.lidDur)));
@@ -194,15 +205,14 @@
     S.pivot.rotation.x = -fallAngle(t, T.fall.S);
     N.pivot.rotation.x =  fallAngle(t, T.fall.N);
 
-    for (const f of fillers) {
-      const p = clamp((t - T.fill - f.delay) / T.fillDur);
-      const s = Math.max(0.0001, easeOutBack(p));
-      f.g.scale.set(s, 1, s);
-      f.g.visible = p > 0;
+    const k = easeInOut(clamp((t - T.grow) / T.growDur));
+    for (const key of ['x0', 'x1', 'z0', 'z1']) {
+      const from = { x0: -CW / 2, x1: CW / 2, z0: -CD / 2, z1: CD / 2 }[key];
+      rect[key] = lerp(from, FINAL[key], k);
     }
+    setRect(rect);
     updateCamera(t);
-    const name = t < T.lid ? '① せり上がり' : t < T.fill ? '② 展開(パタッ)' : '③ 面が広がる';
-    phaseEl.textContent = name;
+    phaseEl.textContent = t < T.lid ? '① せり上がり' : t < T.grow ? '② 展開(パタッ)' : '③ 面が広がる';
   }
 
   // ---------- カメラ(自動 + ドラッグ) ----------
@@ -211,11 +221,15 @@
   function updateCamera(t) {
     const p = easeInOut(clamp(t / (DUR - .3)));
     const az = lerp(-0.35, 0, p) + dAz;
-    const el = clamp(lerp(0.46, 1.08, p) + dEl, 0.08, 1.5);
-    let dist = lerp(8.2, 9.6, p);
-    const aspect = innerWidth / innerHeight;
-    if (aspect < 0.85) dist *= 0.85 / aspect;       // 縦画面ではやや引く
-    target.set(0, lerp(.5, 0, p), lerp(0, -.5, p));
+    const el = clamp(lerp(0.46, 1.1, p) + dEl, 0.08, 1.5);
+    const aspect = innerWidth / innerHeight, th = Math.tan(camera.fov * Math.PI / 360);
+    // 見せたい範囲: 展開前の十字(おおよそ)と、現在の広がった面の大きいほう
+    const bx0 = Math.min(rect.x0, -CW / 2 - CH), bx1 = Math.max(rect.x1, CW / 2 + CH);
+    const bz0 = Math.min(rect.z0, -CD - CH - CD / 2), bz1 = Math.max(rect.z1, CD / 2 + CH);
+    const hw = (bx1 - bx0) / 2 + 1, hd = (bz1 - bz0) / 2 + 1;
+    const dist = Math.max(6.2, hd / th, hw / (th * aspect));
+    const q = easeInOut(clamp(t / T.grow));        // 展開前は箱の近く、後は面の中心へ
+    target.set((bx0 + bx1) / 2, lerp(.3, 0, q), lerp(0, (bz0 + bz1) / 2, q));
     camera.position.set(
       target.x + dist * Math.sin(az) * Math.cos(el),
       target.y + dist * Math.sin(el),
