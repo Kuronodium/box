@@ -28,7 +28,7 @@
 <script>
 (() => {
   // ---------- 設定 ----------
-  const DUR = 7.8;            // 全体の長さ(秒)
+  const DUR = 7.4;            // 全体の長さ(秒)
   const CW = 1, CD = 1.48, CH = 0.55;  // 年賀状(100x148mm)の比率の直方体: 幅, 奥行き, 高さ
   const TILE = 0.5;           // 地模様1枚あたりの大きさ
   const HALF = Math.PI / 2;
@@ -135,7 +135,7 @@
   const clipOpt = { clippingPlanes: [clipPlane], clipShadows: true };
   const mCard = new THREE.MeshStandardMaterial({ map: cardTex, roughness: .85, ...clipOpt });
   const mPat  = new THREE.MeshStandardMaterial({ map: patTex,  roughness: .7,  ...clipOpt });
-  const mOut  = new THREE.MeshStandardMaterial({ color: 0xf3e7cd, roughness: .7, ...clipOpt });
+  const mOut  = new THREE.MeshStandardMaterial({ color: 0xc9a46c, roughness: .8, ...clipOpt });
 
   // 平らに広げたときの中心 (cx,cz) を渡すと、地模様がワールド座標で連続するUVになる
   function makePanel(w, d, cx, cz, card) {
@@ -167,52 +167,75 @@
   const W = hinge(-CW / 2, 0, CH, CD, -CH / 2, 0, -(CW / 2 + CH / 2), 0);
   const S = hinge(0,  CD / 2, CW, CH, 0,  CH / 2, 0,  CD / 2 + CH / 2);
   const N = hinge(0, -CD / 2, CW, CH, 0, -CH / 2, 0, -(CD / 2 + CH / 2));
-  const L = hinge(0, -CH, CW, CD, 0, -CD / 2, 0, -(CD + CH), N.pivot);  // フタは北の壁の先端に蝶番
+  // 段ボール式の4枚フラップ: 東西(長辺側)が天面の中央で突き合わさり、南北は下に潜る
+  const FE = hinge( CH, 0, CW / 2, CD,  CW / 4, 0,  CW / 2 + CH + CW / 4, 0, E.pivot);
+  const FW = hinge(-CH, 0, CW / 2, CD, -CW / 4, 0, -(CW / 2 + CH + CW / 4), 0, W.pivot);
+  const FN = hinge(0, -CH, CW, CW / 2, 0, -CW / 4, 0, -(CD / 2 + CH + CW / 4), N.pivot);
+  const FS = hinge(0,  CH, CW, CW / 2, 0,  CW / 4, 0,  CD / 2 + CH + CW / 4, S.pivot);
+  FN.panel.position.y = FS.panel.position.y = 0.012;   // 閉じたとき東西フラップの下に収まる(Zファイト防止)
 
-  // ---------- 広がる面(地模様。クリップ平面4枚で矩形を外へ広げる) ----------
-  const FINAL = { x0: -3.8, x1: 3.8, z0: -6.3, z1: 4.9 };       // 最終の面(年賀状の約 7 倍幅)
-  const rect = { x0: -CW / 2, x1: CW / 2, z0: -CD / 2, z1: CD / 2 }; // 最初は年賀状と同じ大きさ
-  const sheetPlanes = [
-    new THREE.Plane(new THREE.Vector3( 1, 0, 0), 0), new THREE.Plane(new THREE.Vector3(-1, 0, 0), 0),
-    new THREE.Plane(new THREE.Vector3(0, 0,  1), 0), new THREE.Plane(new THREE.Vector3(0, 0, -1), 0)];
-  const sheetGeo = new THREE.PlaneGeometry(FINAL.x1 - FINAL.x0 + 2, FINAL.z1 - FINAL.z0 + 2).rotateX(-HALF);
-  {
-    const pos = sheetGeo.attributes.position, uv = sheetGeo.attributes.uv;
-    for (let i = 0; i < uv.count; i++) uv.setXY(i, pos.getX(i) / TILE, -pos.getZ(i) / TILE);
-  }
-  const sheet = new THREE.Mesh(sheetGeo, new THREE.MeshStandardMaterial({ map: patTex, roughness: .7, clippingPlanes: sheetPlanes }));
-  sheet.position.set((FINAL.x0 + FINAL.x1) / 2, 0.0005, (FINAL.z0 + FINAL.z1) / 2);
-  sheet.receiveShadow = true;
-  scene.add(sheet);
-  function setRect(r) {
-    sheetPlanes[0].constant = -r.x0; sheetPlanes[1].constant = r.x1;
-    sheetPlanes[2].constant = -r.z0; sheetPlanes[3].constant = r.z1;
+  // ---------- 広がる面: 短辺(CW)角の正方形タイルが、内側の辺を蝶番にバタバタ倒れて外へ波のように広がる ----------
+  const GX = 3, GZ = 5;                        // 中心から ±3 / ±5 マス(7 x 11 マス)
+  const FINAL = { x0: -GX - .5, x1: GX + .5, z0: -GZ - .5, z1: GZ + .5 };
+  const NET = { x0: -(CW + CH), x1: CW + CH, z0: -(CD / 2 + CH + CW / 2), z1: CD / 2 + CH + CW / 2 };
+  const NETX = CW / 2 + CH + CW / 2;           // 展開した十字の半幅
+  const tileFrameMat = new THREE.MeshBasicMaterial({ color: 0xe6c36a });
+  const tileBackMat = new THREE.MeshStandardMaterial({ color: 0xc9a46c, roughness: .7 });
+  const hash = (i, j) => (((i * 73856093) ^ (j * 19349663)) >>> 0) % 100 / 100;
+  const tiles = [];
+  for (let i = -GX; i <= GX; i++) for (let j = -GZ; j <= GZ; j++) {
+    if ((Math.abs(i) <= 1 && j === 0) || (i === 0 && Math.abs(j) <= 1)) continue;   // 十字(展開した箱)の下は不要
+    const alongX = Math.abs(i) > Math.abs(j) * 0.7 || (j === 0);
+    const sgn = alongX ? Math.sign(i) : Math.sign(j);
+    const pivot = new THREE.Group(), inner = new THREE.Group();
+    pivot.position.set(alongX ? i - sgn * .5 : i, 0, alongX ? j : j - sgn * .5);
+    inner.position.set(alongX ? sgn * .5 : 0, 0, alongX ? 0 : sgn * .5);
+    const geo = new THREE.PlaneGeometry(.96, .96).rotateX(-HALF);
+    const pos = geo.attributes.position, uv = geo.attributes.uv;
+    for (let k = 0; k < uv.count; k++) uv.setXY(k, (pos.getX(k) + i) / TILE, -(pos.getZ(k) + j) / TILE);
+    const topMat = new THREE.MeshStandardMaterial({ map: patTex, roughness: .7, emissive: 0xffc860, emissiveIntensity: 0 });
+    const top = new THREE.Mesh(geo, topMat); top.position.y = 0.0006;
+    const frame = new THREE.Mesh(new THREE.PlaneGeometry(1, 1).rotateX(-HALF), tileFrameMat);
+    const back = new THREE.Mesh(new THREE.PlaneGeometry(1, 1).rotateX(HALF), tileBackMat); back.position.y = -0.001;
+    for (const m of [top, back]) m.receiveShadow = true;
+    inner.add(top, frame, back); pivot.add(inner); pivot.visible = false; scene.add(pivot);
+    const r = Math.hypot(i, j * 0.75);
+    tiles.push({ pivot, topMat, alongX, sgn, start: r * 0.17 + hash(i, j) * 0.1 });
   }
 
   // ---------- タイムライン ----------
-  const T = { rise: .3, riseDur: 1.5, lid: 2.3, lidDur: .6,
-              fall: { E: 2.9, W: 3.15, S: 3.4, N: 3.7 }, fallDur: .85, grow: 4.5, growDur: 2.6 };
+  const T = { rise: .3, riseDur: 1.5,
+              flap: { E: 2.2, W: 2.35, N: 2.55, S: 2.7 }, flapDur: .5,
+              fall: { E: 3.3, W: 3.5, S: 3.7, N: 3.9 }, fallDur: .85,
+              grow: 4.85, tileDur: .5, waveSpan: 1.4 };
   const fallAngle = (t, s) => (1 - bounce(clamp((t - s) / T.fallDur))) * HALF;
+  const flapAngle = (t, s) => HALF * (1 - easeInOut(clamp((t - s) / T.flapDur)));
+  const waveK = t => clamp((t - T.grow) / T.waveSpan);   // 広がりの進み具合(カメラ追従用)
 
   function update(t) {
     const rise = easeOutCubic(clamp((t - T.rise) / T.riseDur));
     assembly.position.y = -(CH + .05) * (1 - rise);
     sil.material.opacity = .8 * (1 - clamp((t - T.fall.E) / .6));
 
-    L.pivot.rotation.x = HALF * (1 - easeInOut(clamp((t - T.lid) / T.lidDur)));
+    FE.pivot.rotation.z =  flapAngle(t, T.flap.E);
+    FW.pivot.rotation.z = -flapAngle(t, T.flap.W);
+    FN.pivot.rotation.x =  flapAngle(t, T.flap.N);
+    FS.pivot.rotation.x = -flapAngle(t, T.flap.S);
     E.pivot.rotation.z =  fallAngle(t, T.fall.E);
     W.pivot.rotation.z = -fallAngle(t, T.fall.W);
     S.pivot.rotation.x = -fallAngle(t, T.fall.S);
     N.pivot.rotation.x =  fallAngle(t, T.fall.N);
 
-    const k = easeInOut(clamp((t - T.grow) / T.growDur));
-    for (const key of ['x0', 'x1', 'z0', 'z1']) {
-      const from = { x0: -CW / 2, x1: CW / 2, z0: -CD / 2, z1: CD / 2 }[key];
-      rect[key] = lerp(from, FINAL[key], k);
+    for (const k of tiles) {
+      const u = (t - T.grow - k.start) / T.tileDur;
+      k.pivot.visible = u > 0;
+      if (u <= 0) continue;
+      const a = (1 - bounce(clamp(u))) * HALF * k.sgn;
+      if (k.alongX) k.pivot.rotation.z = a; else k.pivot.rotation.x = -a;
+      k.topMat.emissiveIntensity = .3 * (1 - clamp((u - .36) / .5)) * (u > .0 ? 1 : 0);  // 着地の瞬間にフッと光る
     }
-    setRect(rect);
     updateCamera(t);
-    phaseEl.textContent = t < T.lid ? '① せり上がり' : t < T.grow ? '② 展開(パタッ)' : '③ 面が広がる';
+    phaseEl.textContent = t < T.fall.E ? '① せり上がり・開封' : t < T.grow ? '② 展開(パタッ)' : '③ 面が広がる';
   }
 
   // ---------- カメラ(自動 + ドラッグ) ----------
@@ -224,8 +247,9 @@
     const el = clamp(lerp(0.46, 1.1, p) + dEl, 0.08, 1.5);
     const aspect = innerWidth / innerHeight, th = Math.tan(camera.fov * Math.PI / 360);
     // 見せたい範囲: 展開前の十字(おおよそ)と、現在の広がった面の大きいほう
-    const bx0 = Math.min(rect.x0, -CW / 2 - CH), bx1 = Math.max(rect.x1, CW / 2 + CH);
-    const bz0 = Math.min(rect.z0, -CD - CH - CD / 2), bz1 = Math.max(rect.z1, CD / 2 + CH);
+    const k = easeInOut(waveK(t));
+    const bx0 = lerp(-NETX, FINAL.x0, k), bx1 = lerp(NETX, FINAL.x1, k);
+    const bz0 = lerp(NET.z0, FINAL.z0, k), bz1 = lerp(NET.z1, FINAL.z1, k);
     const hw = (bx1 - bx0) / 2 + 1, hd = (bz1 - bz0) / 2 + 1;
     const dist = Math.max(6.2, hd / th, hw / (th * aspect));
     const q = easeInOut(clamp(t / T.grow));        // 展開前は箱の近く、後は面の中心へ
